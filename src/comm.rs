@@ -12,10 +12,10 @@ use hal::adapter::{
     DeviceType
 };
 
-pub fn pick_adapter<B: Backend>(mut adapters: Vec<Adapter<B>>, surface: B::Surface) -> Result<(B::Device, QueueGroup<B, hal::Graphics>, Vec<MemoryType>, Limits), ()>
+pub fn pick_adapter<B: Backend>(mut adapters: Vec<Adapter<B>>, surface: &B::Surface) -> Result<(B::Device, QueueGroup<B, hal::Graphics>,Adapter<B>), ()>
 {
-    let mut first_device: Option<(B::Device, QueueGroup<B, hal::Graphics>, Vec<MemoryType>, Limits)> = None;
-    let mut second_device: Option<(B::Device, QueueGroup<B, hal::Graphics>, Vec<MemoryType>, Limits)> = None;
+    let mut first_device: Option<(B::Device, QueueGroup<B, hal::Graphics>, Adapter<B>)> = None;
+    let mut second_device: Option<(B::Device, QueueGroup<B, hal::Graphics>, Adapter<B>)> = None;
 
 
     for n in 0..adapters.len() {
@@ -24,21 +24,16 @@ pub fn pick_adapter<B: Backend>(mut adapters: Vec<Adapter<B>>, surface: B::Surfa
         if let Ok(res) = adapter.open_with::<_, hal::Graphics>(1, |queue_family| {
             surface.supports_queue_family(queue_family) && adapter.info.device_type == DeviceType::DiscreteGpu
         }) {
-            let memory_types = adapter.physical_device.memory_properties().memory_types;
-            let limits = adapter.physical_device.limits();
-            first_device = Some((res.0, res.1, memory_types, limits));
-        }
 
-        if let Ok(res) = adapter.open_with::<_, hal::Graphics>(1, |queue_family| {
-            surface.supports_queue_family(queue_family)
-        }) {
-            let memory_types = adapter.physical_device.memory_properties().memory_types;
-            let limits = adapter.physical_device.limits();
-            second_device = Some((res.0, res.1, memory_types, limits));
-        }
-
-        if let Some(_) = first_device {
+            first_device = Some((res.0, res.1,adapter));
             break;
+        }
+        if let None = second_device {
+            if let Ok(res) = adapter.open_with::<_, hal::Graphics>(1, |queue_family| {
+                surface.supports_queue_family(queue_family)
+            }) {
+                second_device = Some((res.0, res.1,adapter));
+            }
         }
     }
 

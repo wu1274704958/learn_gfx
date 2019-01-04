@@ -9,7 +9,9 @@ extern crate glsl_to_spirv;
 extern crate learn_gfx;
 
 use hal::{  Instance,
+            Adapter,
             Device,
+            PhysicalDevice,
             pool
 };
 
@@ -42,11 +44,14 @@ fn main()
     });
 
     let res = pick_adapter(adapters,surface);
-    let (device,mut queue_group,memory_types,limits) = if let Ok(adapter) = res{
+    let (device,mut queue_group,adapter) = if let Ok(adapter) = res{
         adapter
     }else {
         panic!("can not pick a adapter!");
     };
+
+    let memory_types = adapter.physical_device.memory_properties().memory_types;
+    let limits = adapter.physical_device.limits();
 
     let command_pool = unsafe { device.create_command_pool_typed(&queue_group,pool::CommandPoolCreateFlags::empty()) }.unwrap();
 
