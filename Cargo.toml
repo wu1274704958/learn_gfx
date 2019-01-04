@@ -1,0 +1,37 @@
+[package]
+name = "learn_gfx"
+version = "0.1.0"
+authors = ["wws <wu1274704958@qq.com>"]
+edition = "2018"
+
+[features]
+default = []
+vulkan = ["gfx-backend-vulkan"]
+
+[lib]
+name = "learn_gfx"
+
+[[bin]]
+name = "quad"
+path = "src/quad/main.rs"
+
+[[bin]]
+name = "create_command_pool"
+path = "src/create_command_pool/main.rs"
+
+[[bin]]
+name = "triangle"
+path = "src/triangle/main.rs"
+
+[dependencies]
+env_logger = "0.5"
+image = "0.19"
+log = "0.4"
+winit = "0.18"
+glsl-to-spirv = "0.1.4"
+gfx-hal = "0.1.0"
+gfx-backend-empty = "0.1.0"
+
+[dependencies.gfx-backend-vulkan]
+version = "0.1"
+optional = true
