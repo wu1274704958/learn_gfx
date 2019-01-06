@@ -59,12 +59,13 @@ use hal::image::{
     Layout,
     Access,
     SubresourceRange,
-    ViewKind
+    ViewKind,
+    Extent
 };
 
 use hal::window::{
     Extent2D,
-    Backbuffer
+    Backbuffer,SurfaceCapabilities
 };
 use hal::command::{ ClearValue,ClearColor,RenderPassInlineEncoder};
 use hal::queue::Submission;
@@ -225,39 +226,10 @@ fn main()
         unsafe { device.create_graphics_pipeline(&pipeline_desc,None).unwrap() }
     };
 
-    let swapchain_config = SwapchainConfig::from_caps(&caps,format,
-                                                      Extent2D{ width:W,height:H });
-    let extent = swapchain_config.extent.to_extent();
-
-    let (mut swapchain, backbuffer) = unsafe { device.create_swapchain(&mut surface,swapchain_config,None).unwrap()};
-
-    let (image_views,framebuffers) = match backbuffer{
-        Backbuffer::Images(images) => {
-            let color_range = SubresourceRange{
-                aspects : Aspects::COLOR,
-                levels : 0..1,
-                layers : 0..1
-            };
-            let image_views = images.iter().map(|it|{
-                unsafe { device.create_image_view(
-                   it,
-                   ViewKind::D2,
-                   format,
-                   Swizzle::NO,
-                   color_range.clone()
-               ).unwrap() }
-            }).collect::<Vec<_>>();
-
-            let fbos = image_views.iter().map(|it|{
-                unsafe {device.create_framebuffer(&render_pass,vec![it],extent).unwrap()}
-            }).collect::<Vec<_>>();
-
-            (image_views,fbos)
-        },
-        Backbuffer::Framebuffer(framebuffer) => {
-            (vec![],vec![framebuffer])
-        }
-    };
+    let (mut swapchain,
+        extent,
+        image_views,
+        framebuffers)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps,format, W,H);
 
     let frame_semaphore = device.create_semaphore().unwrap();
     let present_semaphore = device.create_semaphore().unwrap();
@@ -315,10 +287,7 @@ fn main()
             wait_semaphores: Some((&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)),
             signal_semaphores : vec![&present_semaphore],
         };
-//        let submission = Submission::new()
-//            .wait_on(&[(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)])
-//            .signal(&[])
-//            .submit(vec![finished_command_buffer]);
+
 
         unsafe {
             queue_group.queues[0].submit(submission, None);
@@ -357,6 +326,43 @@ fn main()
     }
 }
 
+fn create_swapchain<B:hal::Backend>(device:&B::Device,surface:& mut B::Surface,render_pass:&B::RenderPass,caps:&SurfaceCapabilities,format:Format,w:u32,h:u32) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
+{
+    let swapchain_config = SwapchainConfig::from_caps(caps,format,
+                                                      Extent2D{ width:w,height:h });
+    let extent = swapchain_config.extent.to_extent();
+
+    let (mut swapchain, backbuffer) = unsafe { device.create_swapchain(surface,swapchain_config,None).unwrap()};
+
+    let (image_views,framebuffers) = match backbuffer{
+        Backbuffer::Images(images) => {
+            let color_range = SubresourceRange{
+                aspects : Aspects::COLOR,
+                levels : 0..1,
+                layers : 0..1
+            };
+            let image_views = images.iter().map(|it|{
+                unsafe { device.create_image_view(
+                    it,
+                    ViewKind::D2,
+                    format,
+                    Swizzle::NO,
+                    color_range.clone()
+                ).unwrap() }
+            }).collect::<Vec<_>>();
+
+            let fbos = image_views.iter().map(|it|{
+                unsafe {device.create_framebuffer(render_pass,vec![it],extent).unwrap()}
+            }).collect::<Vec<_>>();
+
+            (image_views,fbos)
+        },
+        Backbuffer::Framebuffer(framebuffer) => {
+            (vec![],vec![framebuffer])
+        }
+    };
+    (swapchain,extent,image_views,framebuffers)
+}
 
 
 #[cfg(not(feature = "vulkan"))]
