@@ -1,5 +1,9 @@
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as bankend;
+
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as bankend;
+
 extern crate gfx_hal as hal;
 
 extern crate winit;
@@ -83,8 +87,8 @@ const TITLE:&'static str = "triangle";
 const VERTEX_SHADER_PATH:&'static str = "data/triangle/triangle.vert";
 const FRAG_SHADER_PATH:&'static str = "data/triangle/triangle.frag";
 
-//參考 https://github.com/Mistodon/gfx-hal-tutorials/blob/master/src/bin/part00-triangle.rs
-#[cfg(feature = "vulkan")]
+//參考
+#[cfg(any(feature = "vulkan",feature = "dx12"))]
 fn main()
 {
     let mut events_loop = winit::EventsLoop::new();
@@ -284,7 +288,7 @@ fn main()
         };
         let submission = Submission{
             command_buffers: Some(&finished_command_buffer),
-            wait_semaphores: Some((&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)),
+            wait_semaphores: vec![(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)],
             signal_semaphores : vec![&present_semaphore],
         };
 
@@ -365,7 +369,7 @@ fn create_swapchain<B:hal::Backend>(device:&B::Device,surface:& mut B::Surface,r
 }
 
 
-#[cfg(not(feature = "vulkan"))]
+#[cfg(not(any(feature = "vulkan",feature = "dx12")))]
 fn main()
 {
     println!("feature must be vulkan!");

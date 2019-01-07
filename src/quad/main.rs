@@ -1,5 +1,9 @@
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
+
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as back;
+
 extern crate gfx_hal as hal;
 
 extern crate glsl_to_spirv;
@@ -51,7 +55,7 @@ const COLOR_RANGE: i::SubresourceRange = i::SubresourceRange {
     layers: 0..1,
 };
 
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan",feature = "dx12"))]
 fn main() {
     env_logger::init();
 
@@ -724,7 +728,7 @@ fn main() {
 }
 
 
-#[cfg(not(feature = "vulkan"))]
+#[cfg(not(any(feature = "vulkan",feature = "dx12")))]
 fn main() {
     println!("feature must be vulkan!");
 }

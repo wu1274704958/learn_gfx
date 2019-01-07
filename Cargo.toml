@@ -7,6 +7,7 @@ edition = "2018"
 [features]
 default = []
 vulkan = ["gfx-backend-vulkan"]
+dx12 = ["gfx-backend-dx12"]
 
 [lib]
 name = "learn_gfx"
@@ -35,3 +36,8 @@ gfx-backend-empty = "0.1.0"
 [dependencies.gfx-backend-vulkan]
 version = "0.1"
 optional = true
+
+[target.'cfg(windows)'.dependencies.gfx-backend-dx12]
+version = "0.1"
+optional = true
+
