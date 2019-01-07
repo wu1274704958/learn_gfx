@@ -87,7 +87,7 @@ const TITLE:&'static str = "triangle";
 const VERTEX_SHADER_PATH:&'static str = "data/triangle/triangle.vert";
 const FRAG_SHADER_PATH:&'static str = "data/triangle/triangle.frag";
 
-//參考
+//參考 https://github.com/grovesNL/gfx-hal-tutorial/blob/master/src/15_hello_triangle.rs
 #[cfg(any(feature = "vulkan",feature = "dx12"))]
 fn main()
 {
