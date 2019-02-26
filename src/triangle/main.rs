@@ -146,9 +146,17 @@ fn main()
             layouts: Layout::Undefined..Layout::Present
         };
 
+        let depth_attachment = Attachment {
+            format: Some(format),
+            samples: 1,
+            ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
+            stencil_ops: AttachmentOps::DONT_CARE,
+            layouts: Layout::Undefined..Layout::Present
+        };
+
         let sub_pass = SubpassDesc {
             colors: &[(0, Layout::ColorAttachmentOptimal)],
-            depth_stencil: None,
+            depth_stencil: None,//Some(&(1, Layout::DepthStencilAttachmentOptimal)),
             inputs: &[],
             resolves: &[],
             preserves: &[]
@@ -156,11 +164,17 @@ fn main()
 
         let dependency = SubpassDependency {
             passes : SubpassRef::External..SubpassRef::Pass(0),
-            stages : PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-            accesses : Access::empty() .. (Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)
+            stages : PipelineStage::BOTTOM_OF_PIPE..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+            accesses : Access::MEMORY_READ .. (Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)
         };
 
-        unsafe { device.create_render_pass(&[color_attachment],&[sub_pass],&[dependency]).unwrap() }
+        let dependency2 = SubpassDependency {
+            passes : SubpassRef::Pass(0)..SubpassRef::External,
+            stages : PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::BOTTOM_OF_PIPE,
+            accesses : (Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)..Access::MEMORY_READ
+        };
+
+        unsafe { device.create_render_pass(&[color_attachment],&[sub_pass],&[dependency,dependency2]).unwrap() }
     };
 
     let pipeline_layout = unsafe {device.create_pipeline_layout(&[],&[]).unwrap() };
@@ -237,6 +251,7 @@ fn main()
 
     let frame_semaphore = device.create_semaphore().unwrap();
     let present_semaphore = device.create_semaphore().unwrap();
+    let mut fence = device.create_fence(false).expect("Can't create fence");
 
     loop{
         let mut quiting = false;
@@ -258,7 +273,7 @@ fn main()
         };
         let finished_command_buffer = {
             let mut command_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
-
+            unsafe{command_buffer.begin();}
             let viewport = Viewport{
                 rect : Rect { x : 0, y: 0, w : extent.width as _, h : extent.height as _  },
                 depth : 0.0 .. 1.0
@@ -288,13 +303,16 @@ fn main()
         };
         let submission = Submission{
             command_buffers: Some(&finished_command_buffer),
-            wait_semaphores: vec![(&frame_semaphore, PipelineStage::BOTTOM_OF_PIPE)],
+            wait_semaphores: vec![(&frame_semaphore, PipelineStage::COLOR_ATTACHMENT_OUTPUT)],
             signal_semaphores : vec![&present_semaphore],
         };
 
 
         unsafe {
-            queue_group.queues[0].submit(submission, None);
+            queue_group.queues[0].submit(submission, Some(&mut fence));
+
+            device.wait_for_fence(&fence, !0).unwrap();
+            command_pool.free(Some(finished_command_buffer));
 
             swapchain
             .present(
