@@ -146,17 +146,9 @@ fn main()
             layouts: Layout::Undefined..Layout::Present
         };
 
-        let depth_attachment = Attachment {
-            format: Some(format),
-            samples: 1,
-            ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
-            stencil_ops: AttachmentOps::DONT_CARE,
-            layouts: Layout::Undefined..Layout::Present
-        };
-
         let sub_pass = SubpassDesc {
             colors: &[(0, Layout::ColorAttachmentOptimal)],
-            depth_stencil: None,//Some(&(1, Layout::DepthStencilAttachmentOptimal)),
+            depth_stencil: None,
             inputs: &[],
             resolves: &[],
             preserves: &[]
@@ -168,13 +160,7 @@ fn main()
             accesses : Access::MEMORY_READ .. (Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)
         };
 
-        let dependency2 = SubpassDependency {
-            passes : SubpassRef::Pass(0)..SubpassRef::External,
-            stages : PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::BOTTOM_OF_PIPE,
-            accesses : (Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)..Access::MEMORY_READ
-        };
-
-        unsafe { device.create_render_pass(&[color_attachment],&[sub_pass],&[dependency,dependency2]).unwrap() }
+        unsafe { device.create_render_pass(&[color_attachment],&[sub_pass],&[dependency]).unwrap() }
     };
 
     let pipeline_layout = unsafe {device.create_pipeline_layout(&[],&[]).unwrap() };
@@ -251,7 +237,11 @@ fn main()
 
     let frame_semaphore = device.create_semaphore().unwrap();
     let present_semaphore = device.create_semaphore().unwrap();
-    let mut fence = device.create_fence(false).expect("Can't create fence");
+    let mut fences:Vec<_> = Vec::new();
+    for _ in 0..framebuffers.len(){
+        fences.push(device.create_fence(false).expect("Can't create fence"));
+    }
+
 
     loop{
         let mut quiting = false;
@@ -309,9 +299,9 @@ fn main()
 
 
         unsafe {
-            queue_group.queues[0].submit(submission, Some(&mut fence));
+            queue_group.queues[0].submit(submission, Some(&mut fences[frame_index as usize]));
 
-            device.wait_for_fence(&fence, !0).unwrap();
+            device.wait_for_fence(&fences[frame_index as usize], !0).unwrap();
             command_pool.free(Some(finished_command_buffer));
 
             swapchain
@@ -345,6 +335,10 @@ fn main()
 
         device.destroy_semaphore(frame_semaphore);
         device.destroy_semaphore(present_semaphore);
+
+        for fence in fences{
+            device.destroy_fence(fence);
+        }
     }
 }
 
