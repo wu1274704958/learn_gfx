@@ -24,6 +24,10 @@ path = "src/create_command_pool/main.rs"
 name = "triangle"
 path = "src/triangle/main.rs"
 
+[[bin]]
+name = "triangle2"
+path = "src/triangle2/main.rs"
+
 [dependencies]
 env_logger = "0.5"
 image = "0.19"
