@@ -231,14 +231,19 @@ fn main()
     };
 
     let (mut swapchain,
-        extent,
-        image_views,
-        framebuffers)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps,format, W,H);
+        mut extent,
+        mut image_views,
+        mut framebuffers)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps,format, W,H,None);
 
     let frame_semaphore = device.create_semaphore().unwrap();
     let present_semaphore = device.create_semaphore().unwrap();
     let mut frame_fence = device.create_fence(true).unwrap();
 
+    let mut recreate_swapchain = false;
+    let mut resize_dims = Extent2D {
+        width: 0,
+        height: 0,
+    };
 
     loop{
         let mut quiting = false;
@@ -247,17 +252,48 @@ fn main()
             if let winit::Event::WindowEvent {event,..} = we{
                 match event {
                     WindowEvent::CloseRequested => { quiting = true;},
+                    WindowEvent::Resized(dims) => {
+                        println!("resized to {:?}", dims);
+
+                        recreate_swapchain = true;
+                        resize_dims.width = dims.width as u32;
+                        resize_dims.height = dims.height as u32;
+                    },
                     _ => {}
                 }
             }
         });
 
+        if recreate_swapchain
+        {
+            device.wait_idle().unwrap();
+            let (caps_, ..) =
+                surface.compatibility(physical_device);
+            let (swapchain_,
+                extent_,
+                image_views_,
+                framebuffers_)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps_,format,
+                                                                      resize_dims.width,resize_dims.height,Some(swapchain));
+
+            swapchain = swapchain_;
+            extent = extent_;
+            image_views = image_views_;
+            framebuffers = framebuffers_;
+
+            recreate_swapchain = false;
+        }
+
         if quiting { break; }
         let frame_index = unsafe {
             device.reset_fence(&frame_fence).unwrap();
             command_pool.reset();
-            swapchain.acquire_image(!0, FrameSync::Semaphore(&frame_semaphore))
-                .expect("Failed to acquire frame!")
+            match swapchain.acquire_image(!0, FrameSync::Semaphore(&frame_semaphore)) {
+                Ok(i) => i,
+                Err(_) => {
+                    recreate_swapchain = true;
+                    continue;
+                }
+            }
         };
         let finished_command_buffer = {
             let mut command_buffer = command_pool.acquire_command_buffer::<hal::command::OneShot>();
@@ -301,12 +337,13 @@ fn main()
 
             device.wait_for_fence(&frame_fence, !0).unwrap();
 
-            swapchain
-            .present(
+            if let Err(_) = swapchain.present(
                 &mut queue_group.queues[0],
                 frame_index,
                 vec![&present_semaphore],
-            ).expect("Present failed");
+            ){
+                recreate_swapchain = true;
+            }
         }
     }
 
@@ -339,13 +376,18 @@ fn main()
     }
 }
 
-fn create_swapchain<B:hal::Backend>(device:&B::Device,surface:& mut B::Surface,render_pass:&B::RenderPass,caps:&SurfaceCapabilities,format:Format,w:u32,h:u32) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
+fn create_swapchain<B:hal::Backend>(device:&B::Device,
+                                    surface:& mut B::Surface,
+                                    render_pass:&B::RenderPass,
+                                    caps:&SurfaceCapabilities,
+                                    format:Format,w:u32,h:u32,
+                                    old_swapchain:Option<B::Swapchain>) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
 {
     let swapchain_config = SwapchainConfig::from_caps(caps,format,
                                                       Extent2D{ width:w,height:h });
     let extent = swapchain_config.extent.to_extent();
 
-    let (mut swapchain, backbuffer) = unsafe { device.create_swapchain(surface,swapchain_config,None).unwrap()};
+    let (mut swapchain, backbuffer) = unsafe { device.create_swapchain(surface,swapchain_config,old_swapchain).unwrap()};
 
     let (image_views,framebuffers) = match backbuffer{
         Backbuffer::Images(images) => {
