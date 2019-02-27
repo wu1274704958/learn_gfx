@@ -237,10 +237,7 @@ fn main()
 
     let frame_semaphore = device.create_semaphore().unwrap();
     let present_semaphore = device.create_semaphore().unwrap();
-    let mut fences:Vec<_> = Vec::new();
-    for _ in 0..framebuffers.len(){
-        fences.push(device.create_fence(false).expect("Can't create fence"));
-    }
+    let mut frame_fence = device.create_fence(true).unwrap();
 
 
     loop{
@@ -257,6 +254,7 @@ fn main()
 
         if quiting { break; }
         let frame_index = unsafe {
+            device.reset_fence(&frame_fence).unwrap();
             command_pool.reset();
             swapchain.acquire_image(!0, FrameSync::Semaphore(&frame_semaphore))
                 .expect("Failed to acquire frame!")
@@ -299,10 +297,9 @@ fn main()
 
 
         unsafe {
-            queue_group.queues[0].submit(submission, Some(&mut fences[frame_index as usize]));
+            queue_group.queues[0].submit(submission, Some(&mut frame_fence));
 
-            device.wait_for_fence(&fences[frame_index as usize], !0).unwrap();
-            command_pool.free(Some(finished_command_buffer));
+            device.wait_for_fence(&frame_fence, !0).unwrap();
 
             swapchain
             .present(
@@ -336,9 +333,9 @@ fn main()
         device.destroy_semaphore(frame_semaphore);
         device.destroy_semaphore(present_semaphore);
 
-        for fence in fences{
-            device.destroy_fence(fence);
-        }
+
+        device.destroy_fence(frame_fence);
+
     }
 }
 
