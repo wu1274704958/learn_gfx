@@ -11,7 +11,7 @@ extern crate learn_gfx;
 type TOfB = bankend::Backend;
 
 use winit::WindowEvent;
-use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory};
+use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory,CommandPool,command,Submission,QueueGroup};
 use hal::window::{ Extent2D,Backbuffer };
 use hal::image::{ViewKind,Extent,SubresourceRange,Layout,Access};
 use hal::buffer;
@@ -94,10 +94,17 @@ fn main()
                                                                              &caps,format,
                                                                              W ,H,None);
 
+    let (vertexBuffer,vertexMem) = unsafe{ create_vertex_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
+
+    let (indexBuffer,indexMem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
     unsafe {
         device.destroy_swapchain(swap_chain);
         device.destroy_command_pool(command_pool.into_raw());
         device.destroy_render_pass(render_pass);
+        device.free_memory(vertexMem);
+        device.destroy_buffer(vertexBuffer);
+        device.free_memory(indexMem);
+        device.destroy_buffer(indexBuffer);
         for iv in image_views{
             device.destroy_image_view(iv);
         }
@@ -183,7 +190,10 @@ struct Vertex{
     color : [f32;3]
 }
 
-unsafe fn create_vertex_buffer<B:hal::Backend>(device: &B::Device,mem_types:&Vec<MemoryType>,comm_pool :&B::CommandPool) -> Option<(B::Buffer,B::Memory)>
+unsafe fn create_vertex_buffer<B:hal::Backend>(device: &B::Device,
+                                               mem_types:&Vec<MemoryType>,
+                                               comm_pool :&mut CommandPool<B,hal::Graphics>,
+                                               queue_group:&mut QueueGroup<B,hal::Graphics>) -> Option<(B::Buffer,B::Memory)>
 {
     let vertices = vec![
         Vertex{ pos:[  1.0f32,  1.0f32, 0.0f32 ],   color:[ 1.0f32, 0.0f32, 0.0f32  ] },
@@ -217,7 +227,97 @@ unsafe fn create_vertex_buffer<B:hal::Backend>(device: &B::Device,mem_types:&Vec
 
     device.bind_buffer_memory(&vertexMem,0,&mut vertexBuffer);
 
-    None
+    let cp_cmd = {
+        let mut cp_cmd:command::CommandBuffer<B,hal::Graphics,command::OneShot> = comm_pool.acquire_command_buffer::<command::OneShot>();
+        cp_cmd.begin();
+
+        let regions = command::BufferCopy{
+            src:0,
+            dst:0,
+            size: vertex_byte_size
+        };
+
+        cp_cmd.copy_buffer(&stag_buffer,&vertexBuffer,&[regions]);
+
+        cp_cmd.finish();
+        cp_cmd
+    };
+    let mut fence = device.create_fence(false).unwrap();
+
+    queue_group.queues[0].submit_nosemaphores(&[cp_cmd],Some(&fence));
+    device.wait_for_fence(&fence,!0);
+
+    device.destroy_fence(fence);
+
+    device.free_memory(stag_mem);
+    device.destroy_buffer(stag_buffer);
+
+    Some((vertexBuffer,vertexMem))
+
+}
+
+
+unsafe fn create_index_buffer<B:hal::Backend>(device: &B::Device,
+                                               mem_types:&Vec<MemoryType>,
+                                               comm_pool :&mut CommandPool<B,hal::Graphics>,
+                                               queue_group:&mut QueueGroup<B,hal::Graphics>) -> Option<(B::Buffer,B::Memory)>
+{
+    let indices:Vec<i32> = vec![
+        0,1,2
+    ];
+
+    let byte_size = size_of::<u32>() as u64 * 3;
+    //let device = (device as TOfB::Device);
+    let mut stag_buffer = device.create_buffer(byte_size,
+                                               buffer::Usage::TRANSFER_SRC | buffer::Usage::INDEX ).unwrap();
+
+    let requirment = device.get_buffer_requirements(&stag_buffer) ;
+    let mem_index = get_mem_type_index(requirment.type_mask,
+                                       memory::Properties::COHERENT | memory::Properties::CPU_VISIBLE,
+                                       mem_types).unwrap();
+
+    let stag_mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+    device.bind_buffer_memory(&stag_mem,0,&mut stag_buffer);
+
+    let ptr = device.map_memory(&stag_mem,0..byte_size).unwrap();
+    copy(indices.as_ptr() as *const u8,ptr, size_of::<u32>()  * 3);
+    device.unmap_memory(&stag_mem);
+
+    let mut indexBuffer = device.create_buffer(byte_size,buffer::Usage::TRANSFER_DST | buffer::Usage::INDEX).unwrap();
+
+    let requirment = device.get_buffer_requirements(&indexBuffer);
+    let mem_index = get_mem_type_index(requirment.type_mask,
+                                       memory::Properties::DEVICE_LOCAL,mem_types).unwrap();
+    let indexMem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+
+    device.bind_buffer_memory(&indexMem,0,&mut indexBuffer);
+
+    let cp_cmd = {
+        let mut cp_cmd:command::CommandBuffer<B,hal::Graphics,command::OneShot> = comm_pool.acquire_command_buffer::<command::OneShot>();
+        cp_cmd.begin();
+
+        let regions = command::BufferCopy{
+            src:0,
+            dst:0,
+            size: byte_size
+        };
+
+        cp_cmd.copy_buffer(&stag_buffer,&indexBuffer,&[regions]);
+
+        cp_cmd.finish();
+        cp_cmd
+    };
+    let mut fence = device.create_fence(false).unwrap();
+
+    queue_group.queues[0].submit_nosemaphores(&[cp_cmd],Some(&fence));
+    device.wait_for_fence(&fence,!0);
+
+    device.destroy_fence(fence);
+
+    device.free_memory(stag_mem);
+    device.destroy_buffer(stag_buffer);
+
+    Some((indexBuffer,indexMem))
 
 }
 
