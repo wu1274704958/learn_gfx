@@ -33,7 +33,7 @@ use hal::adapter::{ MemoryType };
 use learn_gfx::comm::pick_adapter;
 use std::mem::size_of;
 use std::ptr::copy;
-use cgmath::{ Matrix4,Vector3,Vector4,perspective,Deg };
+use cgmath::{Matrix4, Vector3, Vector4, perspective, Deg, Rad};
 
 const W:u32 = 800;
 const H:u32 = 600;
@@ -117,6 +117,16 @@ fn main()
 
     let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<bankend::Backend>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
 
+    let triangl = Triangle{
+        pos : Vector3{ x:0.0f32,y:0.0f32,z:-2.0f32 },
+        rotate : Vector3{ x : 0.0,y: 0.0,z : 0.0}
+    };
+
+    let mut width = W;
+    let mut height = H;
+    update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,W as f32 / H as f32);
+
+    let descriptor_pool = create_descriptor_pool::<TOfB>(&device).unwrap();
 
     unsafe {
         device.destroy_swapchain(swap_chain);
@@ -128,6 +138,7 @@ fn main()
         device.destroy_buffer(indexBuffer);
         device.free_memory(uniformMem);
         device.destroy_buffer(uniformBuffer);
+        device.destroy_descriptor_pool(descriptor_pool);
         for iv in image_views{
             device.destroy_image_view(iv);
         }
@@ -326,13 +337,33 @@ unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
 
 fn update_uniform_buffer<B:hal::Backend>(device:&B::Device,mem:&B::Memory,tri:&Triangle,aspect:f32)
 {
-
+    let mut model = Matrix4::<f32>::from_translation(tri.pos);
+    model = Matrix4::<f32>::from_angle_x(Rad(tri.rotate.x)) * model;
+    model = Matrix4::<f32>::from_angle_y(Rad(tri.rotate.y)) * model;
+    model = Matrix4::<f32>::from_angle_z(Rad(tri.rotate.z)) * model;
 
     let ubo = Ubo{
         projection : cgmath::perspective(Deg(60.0),aspect,0.1f32,256.0f32),
-        view : Matrix4::from_scale(1.0f32),
-        model : Matrix4::from_angle_x(1.0f32 )
+        view : Matrix4::<f32>::from_scale(1.0f32),
+        model
     };
+    //let device = device as TOfB::Device;
+    unsafe {
+        let ptr = device.map_memory(mem,0..(size_of::<Ubo>() as u64)).unwrap();
+        copy(&ubo as *const Ubo as *const _,ptr,size_of::<Ubo>());
+        device.unmap_memory(&mem);
+    }
+}
+
+fn create_descriptor_pool<B:hal::Backend>( device : &B::Device ) -> Result<B::DescriptorPool,hal::device::OutOfMemory>
+{
+    //let device = device as TOfB::Device;
+    let descriptor_range_desc =
+        hal::pso::DescriptorRangeDesc{
+            ty : hal::pso::DescriptorType::UniformBuffer,
+            count : 1
+        };
+    unsafe { device.create_descriptor_pool(1,&[descriptor_range_desc]) }
 }
 
 fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
