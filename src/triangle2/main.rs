@@ -8,11 +8,13 @@ extern crate gfx_hal as hal;
 extern crate winit;
 extern crate learn_gfx;
 
+type TOfB = bankend::Backend;
+
 use winit::WindowEvent;
-use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig};
+use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory};
 use hal::window::{ Extent2D,Backbuffer };
 use hal::image::{ViewKind,Extent,SubresourceRange,Layout,Access};
-
+use hal::buffer;
 use hal::pass::{Attachment,
                 AttachmentOps,
                 AttachmentLoadOp,
@@ -26,8 +28,10 @@ use hal::pass::{Attachment,
 use hal::pso::*;
 use hal::format::{Format,ChannelType,Swizzle,Aspects};
 use hal::pool::{CommandPoolCreateFlags};
+use hal::adapter::{ MemoryType };
 use learn_gfx::comm::pick_adapter;
-
+use std::mem::size_of;
+use std::ptr::copy;
 
 const W:u32 = 800;
 const H:u32 = 600;
@@ -90,7 +94,17 @@ fn main()
                                                                              &caps,format,
                                                                              W ,H,None);
 
-
+    unsafe {
+        device.destroy_swapchain(swap_chain);
+        device.destroy_command_pool(command_pool.into_raw());
+        device.destroy_render_pass(render_pass);
+        for iv in image_views{
+            device.destroy_image_view(iv);
+        }
+        for fb in frame_buffers{
+            device.destroy_framebuffer(fb);
+        }
+    }
 }
 
 fn create_render_pass<B : hal::Backend>(device:&B::Device,format:Format) -> Result<B::RenderPass, hal::device::OutOfMemory>
@@ -161,6 +175,70 @@ fn create_swapchain<B:hal::Backend>(device:&B::Device,
         }
     };
     (swapchain,extent,image_views,framebuffers)
+}
+
+#[repr(C)]
+struct Vertex{
+    pos : [f32;3],
+    color : [f32;3]
+}
+
+unsafe fn create_vertex_buffer<B:hal::Backend>(device: &B::Device,mem_types:&Vec<MemoryType>,comm_pool :&B::CommandPool) -> Option<(B::Buffer,B::Memory)>
+{
+    let vertices = vec![
+        Vertex{ pos:[  1.0f32,  1.0f32, 0.0f32 ],   color:[ 1.0f32, 0.0f32, 0.0f32  ] },
+        Vertex{ pos:[  -1.0f32,  1.0f32, 0.0f32 ] , color:[ 0.0f32, 1.0f32, 0.0f32  ] },
+        Vertex{ pos:[  0.0f32, -1.0f32, 0.0f32 ] , color:[ 0.0f32, 0.0f32, 1.0f32  ] }
+    ];
+
+    let vertex_byte_size = size_of::<Vertex>() as u64 * 3;
+    //let device = (device as TOfB::Device);
+    let mut stag_buffer = device.create_buffer(vertex_byte_size,
+                                                             buffer::Usage::TRANSFER_SRC | buffer::Usage::VERTEX ).unwrap();
+
+    let requirment = device.get_buffer_requirements(&stag_buffer) ;
+    let mem_index = get_mem_type_index(requirment.type_mask,
+                                       memory::Properties::COHERENT | memory::Properties::CPU_VISIBLE,
+    mem_types).unwrap();
+
+    let stag_mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+    device.bind_buffer_memory(&stag_mem,0,&mut stag_buffer);
+
+    let ptr = device.map_memory(&stag_mem,0..vertex_byte_size).unwrap();
+    copy(vertices.as_ptr() as *const u8,ptr, size_of::<Vertex>()  * 3);
+    device.unmap_memory(&stag_mem);
+
+    let mut vertexBuffer = device.create_buffer(vertex_byte_size,buffer::Usage::TRANSFER_DST | buffer::Usage::VERTEX).unwrap();
+
+    let requirment = device.get_buffer_requirements(&vertexBuffer);
+    let mem_index = get_mem_type_index(requirment.type_mask,
+                                                    memory::Properties::DEVICE_LOCAL,mem_types).unwrap();
+    let vertexMem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+
+    device.bind_buffer_memory(&vertexMem,0,&mut vertexBuffer);
+
+    None
+
+}
+
+fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
+{
+    let mem_type_count = mem_types.len() as _;
+    let mut i = 0u64;
+    loop{
+        if i >= mem_type_count { break; }
+
+        if (type_mask & 1) == 1
+        {
+            if (mem_types[i as usize].properties & properties) == properties
+            {
+                return Some(i);
+            }
+        }
+
+        i += 1;
+    }
+    None
 }
 
 #[cfg(not(any(feature = "vulkan",feature = "dx12")))]
