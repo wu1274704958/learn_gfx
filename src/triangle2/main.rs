@@ -97,6 +97,9 @@ fn main()
     let (vertexBuffer,vertexMem) = unsafe{ create_vertex_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
     let (indexBuffer,indexMem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
+
+
+
     unsafe {
         device.destroy_swapchain(swap_chain);
         device.destroy_command_pool(command_pool.into_raw());
@@ -201,58 +204,9 @@ unsafe fn create_vertex_buffer<B:hal::Backend>(device: &B::Device,
         Vertex{ pos:[  0.0f32, -1.0f32, 0.0f32 ] , color:[ 0.0f32, 0.0f32, 1.0f32  ] }
     ];
 
-    let vertex_byte_size = size_of::<Vertex>() as u64 * 3;
-    //let device = (device as TOfB::Device);
-    let mut stag_buffer = device.create_buffer(vertex_byte_size,
-                                                             buffer::Usage::TRANSFER_SRC | buffer::Usage::VERTEX ).unwrap();
+    let vertex_byte_size = size_of::<Vertex>() * 3;
 
-    let requirment = device.get_buffer_requirements(&stag_buffer) ;
-    let mem_index = get_mem_type_index(requirment.type_mask,
-                                       memory::Properties::COHERENT | memory::Properties::CPU_VISIBLE,
-    mem_types).unwrap();
-
-    let stag_mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
-    device.bind_buffer_memory(&stag_mem,0,&mut stag_buffer);
-
-    let ptr = device.map_memory(&stag_mem,0..vertex_byte_size).unwrap();
-    copy(vertices.as_ptr() as *const u8,ptr, size_of::<Vertex>()  * 3);
-    device.unmap_memory(&stag_mem);
-
-    let mut vertexBuffer = device.create_buffer(vertex_byte_size,buffer::Usage::TRANSFER_DST | buffer::Usage::VERTEX).unwrap();
-
-    let requirment = device.get_buffer_requirements(&vertexBuffer);
-    let mem_index = get_mem_type_index(requirment.type_mask,
-                                                    memory::Properties::DEVICE_LOCAL,mem_types).unwrap();
-    let vertexMem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
-
-    device.bind_buffer_memory(&vertexMem,0,&mut vertexBuffer);
-
-    let cp_cmd = {
-        let mut cp_cmd:command::CommandBuffer<B,hal::Graphics,command::OneShot> = comm_pool.acquire_command_buffer::<command::OneShot>();
-        cp_cmd.begin();
-
-        let regions = command::BufferCopy{
-            src:0,
-            dst:0,
-            size: vertex_byte_size
-        };
-
-        cp_cmd.copy_buffer(&stag_buffer,&vertexBuffer,&[regions]);
-
-        cp_cmd.finish();
-        cp_cmd
-    };
-    let mut fence = device.create_fence(false).unwrap();
-
-    queue_group.queues[0].submit_nosemaphores(&[cp_cmd],Some(&fence));
-    device.wait_for_fence(&fence,!0);
-
-    device.destroy_fence(fence);
-
-    device.free_memory(stag_mem);
-    device.destroy_buffer(stag_buffer);
-
-    Some((vertexBuffer,vertexMem))
+    copy_buffer_stage(vertices.as_ptr() as _,vertex_byte_size,buffer::Usage::VERTEX,device,mem_types,comm_pool,queue_group)
 
 }
 
@@ -262,14 +216,25 @@ unsafe fn create_index_buffer<B:hal::Backend>(device: &B::Device,
                                                comm_pool :&mut CommandPool<B,hal::Graphics>,
                                                queue_group:&mut QueueGroup<B,hal::Graphics>) -> Option<(B::Buffer,B::Memory)>
 {
-    let indices:Vec<i32> = vec![
+    let indices:Vec<u32> = vec![
         0,1,2
     ];
 
     let byte_size = size_of::<u32>() as u64 * 3;
-    //let device = (device as TOfB::Device);
-    let mut stag_buffer = device.create_buffer(byte_size,
-                                               buffer::Usage::TRANSFER_SRC | buffer::Usage::INDEX ).unwrap();
+
+    copy_buffer_stage(indices.as_ptr() as _,size_of::<u32>(),buffer::Usage::INDEX,device,mem_types,comm_pool,queue_group)
+}
+
+unsafe fn copy_buffer_stage<B:hal::Backend>(src : *const u8,
+                     byte_size: usize,
+                     buffer_usage : buffer::Usage,
+                     device: &B::Device,
+                     mem_types:&Vec<MemoryType>,
+                     comm_pool :&mut CommandPool<B,hal::Graphics>,
+                     queue_group:&mut QueueGroup<B,hal::Graphics> ) -> Option<(B::Buffer,B::Memory)>
+{
+    let mut stag_buffer = device.create_buffer(byte_size as u64,
+                                               buffer::Usage::TRANSFER_SRC | buffer_usage ).unwrap();
 
     let requirment = device.get_buffer_requirements(&stag_buffer) ;
     let mem_index = get_mem_type_index(requirment.type_mask,
@@ -279,11 +244,11 @@ unsafe fn create_index_buffer<B:hal::Backend>(device: &B::Device,
     let stag_mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
     device.bind_buffer_memory(&stag_mem,0,&mut stag_buffer);
 
-    let ptr = device.map_memory(&stag_mem,0..byte_size).unwrap();
-    copy(indices.as_ptr() as *const u8,ptr, size_of::<u32>()  * 3);
+    let ptr = device.map_memory(&stag_mem,0..(byte_size as u64) ).unwrap();
+    copy(src,ptr, byte_size);
     device.unmap_memory(&stag_mem);
 
-    let mut indexBuffer = device.create_buffer(byte_size,buffer::Usage::TRANSFER_DST | buffer::Usage::INDEX).unwrap();
+    let mut indexBuffer = device.create_buffer(byte_size as u64,buffer::Usage::TRANSFER_DST | buffer_usage).unwrap();
 
     let requirment = device.get_buffer_requirements(&indexBuffer);
     let mem_index = get_mem_type_index(requirment.type_mask,
@@ -299,7 +264,7 @@ unsafe fn create_index_buffer<B:hal::Backend>(device: &B::Device,
         let regions = command::BufferCopy{
             src:0,
             dst:0,
-            size: byte_size
+            size: byte_size as _
         };
 
         cp_cmd.copy_buffer(&stag_buffer,&indexBuffer,&[regions]);
@@ -318,8 +283,8 @@ unsafe fn create_index_buffer<B:hal::Backend>(device: &B::Device,
     device.destroy_buffer(stag_buffer);
 
     Some((indexBuffer,indexMem))
-
 }
+
 
 fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
 {
