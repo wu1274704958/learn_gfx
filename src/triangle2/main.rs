@@ -7,6 +7,7 @@ extern crate gfx_backend_vulkan as bankend;
 extern crate gfx_hal as hal;
 extern crate winit;
 extern crate learn_gfx;
+extern crate cgmath;
 
 type TOfB = bankend::Backend;
 
@@ -32,6 +33,7 @@ use hal::adapter::{ MemoryType };
 use learn_gfx::comm::pick_adapter;
 use std::mem::size_of;
 use std::ptr::copy;
+use cgmath::{ Matrix4,Vector3,Vector4,perspective,Deg };
 
 const W:u32 = 800;
 const H:u32 = 600;
@@ -40,6 +42,21 @@ const TITLE:&'static str = "triangle";
 //shader data
 const VERTEX_SHADER_DATA :&[u8] = include_bytes!("../../data/triangle2/triangle.vert.spv");
 const FRAGMENT_SHADER_DATA :&[u8] = include_bytes!("../../data/triangle2/triangle.frag.spv");
+
+type Mat4 = Matrix4<f32>;
+type Vec3 = Vector3<f32>;
+
+#[repr(C)]
+struct Ubo{
+    projection : Mat4,
+    model : Mat4,
+    view : Mat4
+}
+
+struct Triangle{
+    pos : Vec3,
+    rotate : Vec3
+}
 
 #[cfg(any(feature = "vulkan",feature = "dx12"))]
 fn main()
@@ -98,6 +115,7 @@ fn main()
 
     let (indexBuffer,indexMem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
+    let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<bankend::Backend>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
 
 
     unsafe {
@@ -108,6 +126,8 @@ fn main()
         device.destroy_buffer(vertexBuffer);
         device.free_memory(indexMem);
         device.destroy_buffer(indexBuffer);
+        device.free_memory(uniformMem);
+        device.destroy_buffer(uniformBuffer);
         for iv in image_views{
             device.destroy_image_view(iv);
         }
@@ -285,6 +305,35 @@ unsafe fn copy_buffer_stage<B:hal::Backend>(src : *const u8,
     Some((indexBuffer,indexMem))
 }
 
+unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
+                                            buffer_usage : buffer::Usage,
+                                            device: &B::Device,
+                                            mem_types:&Vec<MemoryType> ) -> Option<(B::Buffer,B::Memory)>
+{
+    let mut buffer = device.create_buffer(byte_size,
+                                               buffer_usage ).unwrap();
+
+    let requirment = device.get_buffer_requirements(&buffer) ;
+    let mem_index = get_mem_type_index(requirment.type_mask,
+                                       memory::Properties::COHERENT | memory::Properties::CPU_VISIBLE,
+                                       mem_types).unwrap();
+
+    let mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+    device.bind_buffer_memory(&mem,0,&mut buffer);
+
+    Some((buffer,mem))
+}
+
+fn update_uniform_buffer<B:hal::Backend>(device:&B::Device,mem:&B::Memory,tri:&Triangle,aspect:f32)
+{
+
+
+    let ubo = Ubo{
+        projection : cgmath::perspective(Deg(60.0),aspect,0.1f32,256.0f32),
+        view : Matrix4::from_scale(1.0f32),
+        model : Matrix4::from_angle_x(1.0f32 )
+    };
+}
 
 fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
 {
