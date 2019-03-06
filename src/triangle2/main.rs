@@ -109,7 +109,7 @@ fn main()
                                                                              &mut surface,
                                                                              &render_pass,
                                                                              &caps,format,
-                                                                             W ,H,None);
+                                                                             W ,H,None,None,None);
 
     let (vertexBuffer,vertexMem) = unsafe{ create_vertex_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
@@ -166,7 +166,7 @@ fn main()
                 extent_,
                 image_views_,
                 framebuffers_)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps_,format,
-                                                                       width,height,Some(swap_chain));
+                                                                       width,height,Some(swap_chain),Some(image_views),Some(frame_buffers));
 
             swap_chain = swapchain_;
             extent = extent_;
@@ -261,13 +261,27 @@ fn create_swapchain<B:hal::Backend>(device:&B::Device,
                                     render_pass:&B::RenderPass,
                                     caps:&SurfaceCapabilities,
                                     format:Format,w:u32,h:u32,
-                                    old_swapchain:Option<B::Swapchain>) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
+                                    old_swapchain:Option<B::Swapchain>,
+                                    old_ivs : Option<Vec<B::ImageView>>,
+                                    old_fbs : Option<Vec<B::Framebuffer>>) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
 {
     let swapchain_config = SwapchainConfig::from_caps(caps,format,
                                                       Extent2D{ width:w,height:h });
     let extent = swapchain_config.extent.to_extent();
 
     let (mut swapchain, backbuffer) = unsafe { device.create_swapchain(surface,swapchain_config,old_swapchain).unwrap()};
+
+    if let Some(ivs) = old_ivs{
+        for iv in ivs{
+            unsafe{ device.destroy_image_view(iv); }
+        }
+    }
+
+    if let Some(fbs) = old_fbs{
+        for fb in fbs{
+            unsafe{ device.destroy_framebuffer(fb); }
+        }
+    }
 
     let (image_views,framebuffers) = match backbuffer{
         Backbuffer::Images(images) => {
