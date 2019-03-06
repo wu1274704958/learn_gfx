@@ -32,7 +32,7 @@ use hal::pool::{CommandPoolCreateFlags};
 use hal::adapter::{ MemoryType };
 use learn_gfx::comm::pick_adapter;
 use std::mem::size_of;
-use std::ptr::copy;
+use std::ptr::{copy,write_bytes};
 use cgmath::{Matrix4, Vector3, Vector4, perspective, Deg, Rad};
 
 const W:u32 = 800;
@@ -117,18 +117,27 @@ fn main()
 
     let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<bankend::Backend>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
 
-    let triangl = Triangle{
+    let mut triangl = Triangle{
         pos : Vector3{ x:0.0f32,y:0.0f32,z:-2.0f32 },
         rotate : Vector3{ x : 0.0,y: 0.0,z : 0.0}
     };
 
     let mut width = W;
     let mut height = H;
-    update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,W as f32 / H as f32);
+
 
     let mut descriptor_pool = create_descriptor_pool::<TOfB>(&device).unwrap();
     let descriptor_set_layout = create_descriptor_set_layout::<TOfB>(&device).unwrap();
     let descriptor_set = unsafe{ descriptor_pool.allocate_set(&descriptor_set_layout).unwrap() };
+
+    let write_descriptor_set = DescriptorSetWrite{
+        set : &descriptor_set,
+        binding : 0,
+        array_offset : 0,
+        descriptors : &[ Descriptor::Buffer(&uniformBuffer,None..None)]
+    };
+    unsafe { device.write_descriptor_sets(Some(write_descriptor_set)); }
+    update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,W as f32 / H as f32);
     let pipeline_layout = unsafe { device.create_pipeline_layout(
         vec![&descriptor_set_layout],
         &[]).unwrap() };
@@ -189,14 +198,66 @@ fn main()
             }
         };
 
-//        unsafe {
-//            let draw_buffer = command_pool.acquire_command_buffer::<command::OneShot>();
-//            draw_buffer.begin();
-//
-//
-//
-//            draw_buffer.finish();
-//        }
+        unsafe {
+            let mut draw_buffer = command_pool.acquire_command_buffer::<command::OneShot>();
+            draw_buffer.begin();
+
+            let viewport = Viewport{
+                rect : Rect{ x:0,y:0,w:width as _,h:height as _ },
+                depth : 0.0f32..1.0f32
+            };
+
+            let index_buffer_view = buffer::IndexBufferView{
+                buffer : &indexBuffer,
+                offset : 0,
+                index_type : hal::IndexType::U32
+            };
+
+            draw_buffer.set_viewports(0,&[viewport.clone()]);
+            draw_buffer.set_scissors(0,&[viewport.rect]);
+            draw_buffer.bind_graphics_pipeline(&pipeline);
+            draw_buffer.bind_vertex_buffers(0, Some((&vertexBuffer, 0)));
+            draw_buffer.bind_index_buffer(index_buffer_view);
+            draw_buffer.bind_graphics_descriptor_sets(&pipeline_layout,0,Some(&descriptor_set),&[]);
+
+            {
+                let mut encoder = draw_buffer.begin_render_pass_inline(
+                    &render_pass,
+                    &frame_buffers[frame_index as usize],
+                    viewport.rect,
+                    &[command::ClearValue::Color(command::ClearColor::Float([
+                        0.0, 0.0, 0.0, 1.0,
+                    ]))],
+                );
+                encoder.draw_indexed(0..3,0,0..1);
+            }
+            draw_buffer.finish();
+
+            let submission = Submission{
+                command_buffers: Some(&draw_buffer),
+                wait_semaphores: vec![(&render_semaphore, PipelineStage::COLOR_ATTACHMENT_OUTPUT)],
+                signal_semaphores : vec![&present_semaphore],
+            };
+
+
+            unsafe {
+                queue_group.queues[0].submit(submission, Some(&mut frame_fence));
+
+                device.wait_for_fence(&frame_fence, !0).unwrap();
+
+                command_pool.free(Some(draw_buffer));
+
+                if let Err(_) = swap_chain.present(
+                    &mut queue_group.queues[0],
+                    frame_index,
+                    vec![&present_semaphore],
+                ){
+                    recreate_swapchain = true;
+                }
+            }
+        }
+        update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,width as f32 / height as f32);
+        triangl.pos.z += 0.1f32;
     }
 
     unsafe {
@@ -511,9 +572,12 @@ fn create_pipeline<B: hal::Backend>(device :&B::Device,pipeline_layout: &B::Pipe
             main_pass : render_pass
         };
 
+        let mut rasterizer = Rasterizer::FILL;
+        rasterizer.front_face = FrontFace::Clockwise;
+
         let mut pipeline_desc = GraphicsPipelineDesc::new(shaders,
                                                       Primitive::TriangleList,
-                                                      Rasterizer::FILL,
+                                                      rasterizer,
                                                         pipeline_layout,
                                                         subpass);
 
