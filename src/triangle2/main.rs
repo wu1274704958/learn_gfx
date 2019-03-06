@@ -12,7 +12,7 @@ extern crate cgmath;
 type TOfB = bankend::Backend;
 
 use winit::WindowEvent;
-use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory,CommandPool,command,Submission,QueueGroup};
+use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory,CommandPool,command,Submission,QueueGroup,Primitive,Swapchain};
 use hal::window::{ Extent2D,Backbuffer };
 use hal::image::{ViewKind,Extent,SubresourceRange,Layout,Access};
 use hal::buffer;
@@ -61,7 +61,7 @@ struct Triangle{
 #[cfg(any(feature = "vulkan",feature = "dx12"))]
 fn main()
 {
-    let events_loop = winit::EventsLoop::new();
+    let mut events_loop = winit::EventsLoop::new();
     let wb = winit::WindowBuilder::new()
         .with_dimensions(winit::dpi::LogicalSize::new(W as f64,H as f64))
         .with_title(TITLE);
@@ -105,7 +105,7 @@ fn main()
     };
 
     let render_pass = create_render_pass::<bankend::Backend>(&device,format).ok().unwrap();
-    let (mut swap_chain,extent,image_views,frame_buffers) = create_swapchain::<bankend::Backend>(&device,
+    let (mut swap_chain,mut extent,mut image_views,mut frame_buffers) = create_swapchain::<bankend::Backend>(&device,
                                                                              &mut surface,
                                                                              &render_pass,
                                                                              &caps,format,
@@ -126,9 +126,85 @@ fn main()
     let mut height = H;
     update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,W as f32 / H as f32);
 
-    let descriptor_pool = create_descriptor_pool::<TOfB>(&device).unwrap();
+    let mut descriptor_pool = create_descriptor_pool::<TOfB>(&device).unwrap();
+    let descriptor_set_layout = create_descriptor_set_layout::<TOfB>(&device).unwrap();
+    let descriptor_set = unsafe{ descriptor_pool.allocate_set(&descriptor_set_layout).unwrap() };
+    let pipeline_layout = unsafe { device.create_pipeline_layout(
+        vec![&descriptor_set_layout],
+        &[]).unwrap() };
+
+    let pipeline = create_pipeline::<TOfB>(&device,&pipeline_layout,&render_pass).unwrap();
+    let mut render_semaphore = device.create_semaphore().unwrap();
+    let mut present_semaphore = device.create_semaphore().unwrap();
+    let mut frame_fence = device.create_fence(true).unwrap();
+
+    let mut running = true;
+    let mut recreate_swapchain = false;
+
+    while running {
+        events_loop.poll_events(|event|{
+            if let winit::Event::WindowEvent{event,..} = event{
+                match event {
+                    winit::WindowEvent::KeyboardInput { input : winit::KeyboardInput{ virtual_keycode: Some(winit::VirtualKeyCode::Escape),.. },.. } |
+                    winit::WindowEvent::CloseRequested  =>  running = false,
+
+                    winit::WindowEvent::Resized(dims) => {
+                        width = dims.width as _;
+                        height = dims.height as _;
+                        recreate_swapchain = true;
+                    },
+                    _ => {}
+                }
+            }
+        });
+
+        if recreate_swapchain{
+            device.wait_idle().unwrap();
+            let (caps_, ..) =
+                surface.compatibility(physical_device);
+            let (swapchain_,
+                extent_,
+                image_views_,
+                framebuffers_)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps_,format,
+                                                                       width,height,Some(swap_chain));
+
+            swap_chain = swapchain_;
+            extent = extent_;
+            image_views = image_views_;
+            frame_buffers = framebuffers_;
+
+            recreate_swapchain = false;
+        }
+        if !running { break; }
+
+        let frame_index = unsafe {
+            device.reset_fence(&frame_fence).unwrap();
+            command_pool.reset();
+            match swap_chain.acquire_image(!0, hal::FrameSync::Semaphore(&render_semaphore)) {
+                Ok(i) => i,
+                Err(_) => {
+                    recreate_swapchain = true;
+                    continue;
+                }
+            }
+        };
+
+//        unsafe {
+//            let draw_buffer = command_pool.acquire_command_buffer::<command::OneShot>();
+//            draw_buffer.begin();
+//
+//
+//
+//            draw_buffer.finish();
+//        }
+    }
 
     unsafe {
+        device.wait_idle().unwrap();
+        device.destroy_semaphore(render_semaphore);
+        device.destroy_semaphore(present_semaphore);
+        device.destroy_fence(frame_fence);
+
         device.destroy_swapchain(swap_chain);
         device.destroy_command_pool(command_pool.into_raw());
         device.destroy_render_pass(render_pass);
@@ -138,7 +214,12 @@ fn main()
         device.destroy_buffer(indexBuffer);
         device.free_memory(uniformMem);
         device.destroy_buffer(uniformBuffer);
+        device.destroy_graphics_pipeline(pipeline);
+        device.destroy_pipeline_layout(pipeline_layout);
+        descriptor_pool.free_sets(vec![descriptor_set]);
         device.destroy_descriptor_pool(descriptor_pool);
+        device.destroy_descriptor_set_layout(descriptor_set_layout);
+
         for iv in image_views{
             device.destroy_image_view(iv);
         }
@@ -360,11 +441,106 @@ fn create_descriptor_pool<B:hal::Backend>( device : &B::Device ) -> Result<B::De
     //let device = device as TOfB::Device;
     let descriptor_range_desc =
         hal::pso::DescriptorRangeDesc{
-            ty : hal::pso::DescriptorType::UniformBuffer,
+            ty : DescriptorType::UniformBuffer,
             count : 1
         };
     unsafe { device.create_descriptor_pool(1,&[descriptor_range_desc]) }
 }
+
+fn create_descriptor_set_layout<B: hal::Backend>( device : &B::Device ) -> Result<B::DescriptorSetLayout,hal::device::OutOfMemory>
+{
+    //let device = device as TOfB::Device;
+    let binding = DescriptorSetLayoutBinding{
+        binding : 0,
+        ty : DescriptorType::UniformBuffer,
+        count : 1,
+        stage_flags : ShaderStageFlags::VERTEX,
+        immutable_samplers : false
+    };
+    unsafe { device.create_descriptor_set_layout(&[binding],&[]) }
+}
+
+fn create_pipeline<B: hal::Backend>(device :&B::Device,pipeline_layout: &B::PipelineLayout,render_pass:&B::RenderPass)
+    -> Result<B::GraphicsPipeline,hal::pso::CreationError>
+{
+    //let device = device as TOfB::Device;
+
+
+    unsafe{
+        let vs_module = device.create_shader_module(VERTEX_SHADER_DATA).unwrap();
+        let fs_module = device.create_shader_module(FRAGMENT_SHADER_DATA).unwrap();
+
+        let (vertex,fragment) = {
+            let vs = EntryPoint{
+                entry : "main",
+                module : &vs_module,
+                specialization : Default::default()
+            };
+            let fs = EntryPoint{
+                entry : "main",
+                module : &fs_module,
+                specialization : Default::default()
+            };
+            (vs,fs)
+        };
+
+        let shaders = GraphicsShaderSet{
+            vertex ,
+            hull : None,
+            domain : None,
+            geometry : None,
+            fragment : Some(fragment)
+         };
+
+        let subpass = Subpass{
+            index : 0,
+            main_pass : render_pass
+        };
+
+        let mut pipeline_desc = GraphicsPipelineDesc::new(shaders,
+                                                      Primitive::TriangleList,
+                                                      Rasterizer::FILL,
+                                                        pipeline_layout,
+                                                        subpass);
+
+        pipeline_desc.blender.targets.push(
+            ColorBlendDesc::EMPTY
+        );
+
+        pipeline_desc.vertex_buffers.push(
+            VertexBufferDesc{
+                binding: 0,
+                stride: size_of::<Vertex>() as _,
+                rate : 0
+            }
+        );
+
+        pipeline_desc.attributes.push(AttributeDesc{
+            location: 0,
+            binding : 0,
+            element : Element::<Format>{
+                format : Format::Rgb32Float,
+                offset : 0
+            }
+        });
+
+        pipeline_desc.attributes.push(AttributeDesc{
+            location: 1,
+            binding : 0,
+            element : Element::<Format>{
+                format : Format::Rgb32Float,
+                offset : (size_of::<f32>() * 3) as _
+            }
+        });
+
+
+        let res = device.create_graphics_pipeline(&pipeline_desc,None);
+        device.destroy_shader_module(vs_module);
+        device.destroy_shader_module(fs_module);
+        res
+    }
+}
+
 
 fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
 {
