@@ -36,6 +36,7 @@ use std::mem::size_of;
 use std::ptr::{copy,write_bytes};
 use cgmath::{Matrix4, Vector3, Vector4, perspective, Deg, Rad};
 use std::ops::Deref;
+use winit::dpi::LogicalPosition;
 
 const W:u32 = 800;
 const H:u32 = 600;
@@ -151,6 +152,7 @@ fn main()
     let mut width = W;
     let mut height = H;
 
+    let mut view_rot = Vector3::<f32>{x:0.0,y:0.0,z:0.0};
 
     let mut descriptor_pool = create_descriptor_pool::<TOfB>(&device).unwrap();
     let descriptor_set_layout = create_descriptor_set_layout::<TOfB>(&device).unwrap();
@@ -163,7 +165,7 @@ fn main()
         descriptors : &[ Descriptor::Buffer(&uniformBuffer,None..None)]
     };
     unsafe { device.write_descriptor_sets(Some(write_descriptor_set)); }
-    update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,W as f32 / H as f32);
+    update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,view_rot,W as f32 / H as f32);
     let pipeline_layout = unsafe { device.create_pipeline_layout(
         vec![&descriptor_set_layout],
         &[]).unwrap() };
@@ -175,6 +177,8 @@ fn main()
 
     let mut running = true;
     let mut recreate_swapchain = false;
+    let mut left_button_down = false;
+    let mut cursor_pos = LogicalPosition::new(0.0,0.0);
 
     while running {
         events_loop.poll_events(|event|{
@@ -187,6 +191,22 @@ fn main()
                         width = dims.width as _;
                         height = dims.height as _;
                         recreate_swapchain = true;
+                    },
+                    winit::WindowEvent::MouseInput {button:winit::MouseButton::Left ,state,..} => {
+                        match state {
+                            winit::ElementState::Pressed => { left_button_down = true; },
+                            winit::ElementState::Released => { left_button_down = false; }
+                        }
+                    },
+                    winit::WindowEvent::CursorMoved { position,.. } => {
+                        if left_button_down{
+                            let offset = LogicalPosition::new(position.x - cursor_pos.x,position.y - cursor_pos.y);
+                            triangl.rotate.y += (offset.x * 1.25) as f32;
+//                            triangl.rotate.x -= (offset.y * 1.25) as f32;
+//                            view_rot.y += (offset.x ) as f32;
+                            view_rot.x -= (offset.y * 1.25) as f32;
+                        }
+                        cursor_pos = position;
                     },
                     _ => {}
                 }
@@ -285,8 +305,7 @@ fn main()
                 }
             }
         }
-        update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,width as f32 / height as f32);
-        triangl.rotate.y += 0.1f32;
+        update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,view_rot,width as f32 / height as f32);
     }
 
     unsafe {
@@ -529,16 +548,21 @@ unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
     Some((buffer,mem))
 }
 
-fn update_uniform_buffer<B:hal::Backend>(device:&B::Device,mem:&B::Memory,tri:&Triangle,aspect:f32)
+fn update_uniform_buffer<B:hal::Backend>(device:&B::Device,mem:&B::Memory,tri:&Triangle,view_rot:Vector3<f32>,aspect:f32)
 {
     let mut model = Matrix4::<f32>::from_scale(1.0f32);
-    model = Matrix4::<f32>::from_angle_x(Rad(tri.rotate.x)) * model;
-    model = Matrix4::<f32>::from_angle_y(Rad(tri.rotate.y)) * model;
-    model = Matrix4::<f32>::from_angle_z(Rad(tri.rotate.z)) * model;
-    model = Matrix4::<f32>::from_translation(tri.pos) * model;
+    model = Matrix4::<f32>::from_angle_x(Rad(tri.rotate.x.to_radians())) * model;
+    model = Matrix4::<f32>::from_angle_y(Rad(tri.rotate.y.to_radians())) * model;
+    model = Matrix4::<f32>::from_angle_z(Rad(tri.rotate.z.to_radians())) * model;
+
+    let mut view = Matrix4::<f32>::from_scale(1.0f32);
+    view = Matrix4::<f32>::from_angle_x(Rad(view_rot.x.to_radians())) * view;
+    view = Matrix4::<f32>::from_angle_y(Rad(view_rot.y.to_radians())) * view;
+    view = Matrix4::<f32>::from_angle_z(Rad(view_rot.z.to_radians())) * view;
+    view = Matrix4::<f32>::from_translation(tri.pos) * view;
     let ubo = Ubo{
         projection : cgmath::perspective(Deg(60.0),aspect,0.1f32,256.0f32),
-        view : Matrix4::<f32>::from_scale(1.0f32),
+        view,
         model
     };
     //let device = device as TOfB::Device;
