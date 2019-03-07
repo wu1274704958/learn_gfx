@@ -1,8 +1,8 @@
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as bankend;
 
-//#[cfg(feature = "dx12")]
-//extern crate gfx_backend_dx12 as bankend;
+#[cfg(feature = "dx12")]
+extern crate gfx_backend_dx12 as bankend;
 
 extern crate gfx_hal as hal;
 extern crate winit;
@@ -14,7 +14,7 @@ type TOfB = bankend::Backend;
 use winit::WindowEvent;
 use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory,CommandPool,command,Submission,QueueGroup,Primitive,Swapchain};
 use hal::window::{ Extent2D,Backbuffer };
-use hal::image::{ViewKind,Extent,SubresourceRange,Layout,Access};
+use hal::image::{ViewKind,Extent,SubresourceRange,Layout,Access,Kind,Tiling,Usage,ViewCapabilities};
 use hal::buffer;
 use hal::pass::{Attachment,
                 AttachmentOps,
@@ -26,8 +26,9 @@ use hal::pass::{Attachment,
                 SubpassRef,
                 Subpass
 };
+use hal::command::ClearDepthStencil;
 use hal::pso::*;
-use hal::format::{Format,ChannelType,Swizzle,Aspects};
+use hal::format::{Format,ChannelType,Swizzle,Aspects,ImageFeature};
 use hal::pool::{CommandPoolCreateFlags};
 use hal::adapter::{ MemoryType };
 use learn_gfx::comm::pick_adapter;
@@ -57,6 +58,24 @@ struct Ubo{
 struct Triangle{
     pos : Vec3,
     rotate : Vec3
+}
+
+struct DepthStencil<B : hal::Backend>{
+    pub image : B::Image,
+    pub memory : B::Memory,
+    pub view : B::ImageView
+}
+
+impl<B : hal::Backend> DepthStencil<B>
+{
+    pub fn destroy(self,device:&B::Device)
+    {
+        unsafe {
+            device.destroy_image(self.image);
+            device.free_memory(self.memory);
+            device.destroy_image_view(self.view);
+        }
+    }
 }
 
 #[cfg(any(feature = "vulkan",feature = "dx12"))]
@@ -93,6 +112,13 @@ fn main()
 
     let (caps,formats,..) = surface.compatibility(physical_device);
 
+    let depth_format = if let Some(f) = get_depth_format::<TOfB>(physical_device){
+        f
+    }else{
+        panic!("Not get depth format!");
+    };
+
+    let mut depth_stencil = unsafe{ create_depth_stencil::<TOfB>(&device,depth_format,W,H,&memory_types) };
     println!("choose adapter = {:?}",adapter.info);
     println!("caps = {:?}",caps);
     println!("formats = {:?}",formats);
@@ -105,13 +131,12 @@ fn main()
         Format::Rgba8Srgb
     };
 
-    let render_pass = create_render_pass::<bankend::Backend>(&device,format).ok().unwrap();
+    let render_pass = create_render_pass::<bankend::Backend>(&device,format,depth_format).ok().unwrap();
     let (mut swap_chain,mut extent,mut image_views,mut frame_buffers) = create_swapchain::<bankend::Backend>(&device,
                                                                              &mut surface,
                                                                              &render_pass,
                                                                              &caps,format,
-                                                                             W ,H,None,None,None);
-
+                                                                             W ,H,None,None,None,&depth_stencil);
     let (vertexBuffer,vertexMem) = unsafe{ create_vertex_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
     let (indexBuffer,indexMem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
@@ -172,11 +197,15 @@ fn main()
             device.wait_idle().unwrap();
             let (caps_, ..) =
                 surface.compatibility(physical_device);
+            depth_stencil.destroy(&device);
+            depth_stencil = unsafe{ create_depth_stencil::<TOfB>(&device,depth_format,width,height,&memory_types) };
             let (swapchain_,
                 extent_,
                 image_views_,
                 framebuffers_)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps_,format,
-                                                                       width,height,Some(swap_chain),Some(image_views),Some(frame_buffers));
+                                                                       width,height,Some(swap_chain),Some(image_views),
+                                                                       Some(frame_buffers),
+                                                                        &depth_stencil);
 
             swap_chain = swapchain_;
             extent = extent_;
@@ -226,9 +255,8 @@ fn main()
                     &render_pass,
                     &frame_buffers[frame_index as usize],
                     viewport.rect,
-                    &[command::ClearValue::Color(command::ClearColor::Float([
-                        0.0, 0.0, 0.0, 1.0,
-                    ]))],
+                    &[command::ClearValue::Color(command::ClearColor::Float([0.0, 0.0, 0.0, 1.0] ) ),
+                        command::ClearValue::DepthStencil(ClearDepthStencil(1.0,0))],
                 );
                 encoder.draw_indexed(0..3,0,0..1);
             }
@@ -281,7 +309,7 @@ fn main()
         descriptor_pool.free_sets(vec![descriptor_set]);
         device.destroy_descriptor_pool(descriptor_pool);
         device.destroy_descriptor_set_layout(descriptor_set_layout);
-
+        depth_stencil.destroy(&device);
         for iv in image_views{
             device.destroy_image_view(iv);
         }
@@ -291,7 +319,7 @@ fn main()
     }
 }
 
-fn create_render_pass<B : hal::Backend>(device:&B::Device,format:Format) -> Result<B::RenderPass, hal::device::OutOfMemory>
+fn create_render_pass<B : hal::Backend>(device:&B::Device,format:Format,depth_format:Format) -> Result<B::RenderPass, hal::device::OutOfMemory>
 {
     let color_attachment = Attachment{
         format : Some(format),
@@ -300,9 +328,17 @@ fn create_render_pass<B : hal::Backend>(device:&B::Device,format:Format) -> Resu
         stencil_ops : AttachmentOps::DONT_CARE,
         layouts:  Layout::Undefined..Layout::Present
     };
+
+    let depth_attachment = Attachment{
+        format : Some(depth_format),
+        samples : 1,
+        ops : AttachmentOps::new(AttachmentLoadOp::Clear,AttachmentStoreOp::DontCare),
+        stencil_ops : AttachmentOps::DONT_CARE,
+        layouts : Layout::Undefined..Layout::DepthStencilAttachmentOptimal
+    };
     let sub_pass_desc = SubpassDesc{
         colors : &[(0,Layout::ColorAttachmentOptimal)],
-        depth_stencil : None,
+        depth_stencil : Some(&(1,Layout::DepthStencilAttachmentOptimal)),
         inputs : &[],
         resolves : &[],
         preserves : &[]
@@ -313,7 +349,7 @@ fn create_render_pass<B : hal::Backend>(device:&B::Device,format:Format) -> Resu
         accesses: Access::MEMORY_READ..(Access::COLOR_ATTACHMENT_WRITE | Access::COLOR_ATTACHMENT_READ)
     };
 
-    unsafe { device.create_render_pass(&[color_attachment],
+    unsafe { device.create_render_pass(&[color_attachment,depth_attachment],
                                        &[sub_pass_desc],
                                        &[sub_pass_dependency]) }
 }
@@ -325,7 +361,8 @@ fn create_swapchain<B:hal::Backend>(device:&B::Device,
                                     format:Format,w:u32,h:u32,
                                     old_swapchain:Option<B::Swapchain>,
                                     old_ivs : Option<Vec<B::ImageView>>,
-                                    old_fbs : Option<Vec<B::Framebuffer>>) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
+                                    old_fbs : Option<Vec<B::Framebuffer>>,
+                                    depth_stencil : &DepthStencil<B>) -> (B::Swapchain,Extent,Vec<B::ImageView>,Vec<B::Framebuffer>)
 {
     let swapchain_config = SwapchainConfig::from_caps(caps,format,
                                                       Extent2D{ width:w,height:h });
@@ -363,7 +400,7 @@ fn create_swapchain<B:hal::Backend>(device:&B::Device,
             }).collect::<Vec<_>>();
 
             let fbos = image_views.iter().map(|it|{
-                unsafe {device.create_framebuffer(render_pass,vec![it],extent).unwrap()}
+                unsafe {device.create_framebuffer(render_pass,vec![it,&(depth_stencil.view)],extent).unwrap()}
             }).collect::<Vec<_>>();
 
             (image_views,fbos)
@@ -612,6 +649,10 @@ fn create_pipeline<B: hal::Backend>(device :&B::Device,pipeline_layout: &B::Pipe
             }
         });
 
+        pipeline_desc.depth_stencil.depth = hal::pso::DepthTest::On { fun : hal::pso::Comparison::LessEqual,write:true };
+        pipeline_desc.depth_stencil.stencil = hal::pso::StencilTest::Off;
+        pipeline_desc.depth_stencil.depth_bounds = false;
+
 
         let res = device.create_graphics_pipeline(&pipeline_desc,None);
         device.destroy_shader_module(vs_module);
@@ -639,6 +680,56 @@ fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types
         i += 1;
     }
     None
+}
+
+fn get_depth_format<B: hal::Backend>(physical_device:&B::PhysicalDevice) -> Option<Format>
+{
+    let expect_arr = [
+        Format::D32FloatS8Uint,
+        Format::D32Float,
+        Format::D24UnormS8Uint,
+        Format::D16UnormS8Uint,
+        Format::D16Unorm
+    ];
+    //let physical_device = physical_device as TOfB::PhysicalDevice;
+
+    for f in expect_arr.iter() {
+        let properties = physical_device.format_properties(Some(*f));
+        let res:u32 = unsafe{ std::mem::transmute(properties.optimal_tiling & ImageFeature::DEPTH_STENCIL_ATTACHMENT ) };
+        if res != 0u32{
+            return Some(*f);
+        }
+    }
+    None
+}
+
+unsafe fn create_depth_stencil<B: hal::Backend>(device : &B::Device,depth_format:Format,w : u32,h :u32,mem_types:&Vec<MemoryType>) -> DepthStencil<B>
+{
+    //let device = device as TOfB::Device;
+    let mut img = device.create_image(Kind::D2(w as _,h as _,1,1),
+                        1,depth_format,
+                        Tiling::Optimal,
+                        Usage::DEPTH_STENCIL_ATTACHMENT | Usage::TRANSFER_SRC,
+                        ViewCapabilities::empty()).unwrap();
+
+
+    let requirment = device.get_image_requirements(&img);
+    let mem_index = get_mem_type_index(requirment.type_mask,memory::Properties::DEVICE_LOCAL,mem_types).unwrap();
+    let mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+
+    let range = SubresourceRange{
+        aspects : Aspects::DEPTH | Aspects::STENCIL,
+        layers : 0..1,
+        levels : 0..1
+    };
+    device.bind_image_memory(&mem,0,&mut img);
+    let view = device.create_image_view(&img,ViewKind::D2,depth_format,Swizzle::NO,range).unwrap();
+
+    DepthStencil::<B>{
+        image : img,
+        memory : mem,
+        view
+    }
 }
 
 #[cfg(not(any(feature = "vulkan",feature = "dx12")))]

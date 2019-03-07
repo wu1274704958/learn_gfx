@@ -43,7 +43,7 @@ fn main()
         println!("{} {:?}",it.0,it.1.info);
     });
 
-    let res = pick_adapter(adapters,surface);
+    let res = pick_adapter(adapters,&surface);
     let (device,mut queue_group,adapter) = if let Ok(adapter) = res{
         adapter
     }else {
