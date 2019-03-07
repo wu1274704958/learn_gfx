@@ -11,7 +11,7 @@ extern crate gfx_hal as hal;
 extern crate winit;
 extern crate learn_gfx;
 extern crate cgmath;
-
+#[cfg(any(feature = "vulkan",feature = "dx12",feature = "gl"))]
 type TOfB = backend::Backend;
 
 use winit::WindowEvent;
