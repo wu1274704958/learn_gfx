@@ -1,15 +1,15 @@
 #[cfg(feature = "vulkan")]
-extern crate gfx_backend_vulkan as bankend;
+extern crate gfx_backend_vulkan as backend;
 
 #[cfg(feature = "dx12")]
-extern crate gfx_backend_dx12 as bankend;
+extern crate gfx_backend_dx12 as backend;
 
 extern crate gfx_hal as hal;
 extern crate winit;
 extern crate learn_gfx;
 extern crate cgmath;
 
-type TOfB = bankend::Backend;
+type TOfB = backend::Backend;
 
 use winit::WindowEvent;
 use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory,CommandPool,command,Submission,QueueGroup,Primitive,Swapchain};
@@ -33,9 +33,8 @@ use hal::pool::{CommandPoolCreateFlags};
 use hal::adapter::{ MemoryType };
 use learn_gfx::comm::pick_adapter;
 use std::mem::size_of;
-use std::ptr::{copy,write_bytes};
-use cgmath::{Matrix4, Vector3, Vector4, perspective, Deg, Rad};
-use std::ops::Deref;
+use std::ptr::{copy};
+use cgmath::{Matrix4, Vector3, Deg, Rad};
 use winit::dpi::LogicalPosition;
 
 const W:u32 = 800;
@@ -87,9 +86,9 @@ fn main()
         .with_dimensions(winit::dpi::LogicalSize::new(W as f64,H as f64))
         .with_title(TITLE);
 
-    let (window,instance,mut surface,mut adapters) = {
+    let (_window,_instance,mut surface,mut adapters) = {
         let window = wb.build(&events_loop).unwrap();
-        let instance = bankend::Instance::create(TITLE,1);
+        let instance = backend::Instance::create(TITLE,1);
         let surface = instance.create_surface(&window);
         let adapters = instance.enumerate_adapters();
 
@@ -132,8 +131,8 @@ fn main()
         Format::Rgba8Srgb
     };
 
-    let render_pass = create_render_pass::<bankend::Backend>(&device,format,depth_format).ok().unwrap();
-    let (mut swap_chain,mut extent,mut image_views,mut frame_buffers) = create_swapchain::<bankend::Backend>(&device,
+    let render_pass = create_render_pass::<TOfB>(&device,format,depth_format).ok().unwrap();
+    let (mut swap_chain,mut extent,mut image_views,mut frame_buffers) = create_swapchain::<TOfB>(&device,
                                                                              &mut surface,
                                                                              &render_pass,
                                                                              &caps,format,
@@ -142,7 +141,7 @@ fn main()
 
     let (indexBuffer,indexMem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
-    let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<bankend::Backend>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
+    let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<TOfB>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
 
     let mut triangl = Triangle{
         pos : Vector3{ x:0.0f32,y:0.0f32,z:-4.0f32 },
@@ -222,7 +221,7 @@ fn main()
             let (swapchain_,
                 extent_,
                 image_views_,
-                framebuffers_)  = create_swapchain::<bankend::Backend>(&device,&mut surface, &render_pass, &caps_,format,
+                framebuffers_)  = create_swapchain::<TOfB>(&device,&mut surface, &render_pass, &caps_,format,
                                                                        width,height,Some(swap_chain),Some(image_views),
                                                                        Some(frame_buffers),
                                                                         &depth_stencil);
