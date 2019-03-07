@@ -4,6 +4,9 @@ extern crate gfx_backend_vulkan as back;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as back;
 
+#[cfg(feature = "gl")]
+extern crate gfx_backend_gl as back;
+
 extern crate gfx_hal as hal;
 
 extern crate glsl_to_spirv;
@@ -55,7 +58,7 @@ const COLOR_RANGE: i::SubresourceRange = i::SubresourceRange {
     layers: 0..1,
 };
 
-#[cfg(any(feature = "vulkan",feature = "dx12"))]
+#[cfg(any(feature = "vulkan",feature = "dx12",feature = "gl"))]
 fn main() {
     env_logger::init();
 
@@ -67,12 +70,26 @@ fn main() {
             DIMS.height as _,
         )).with_title("quad".to_string());
     // instantiate backend
+    #[cfg(not(feature = "gl"))]
     let (_window, _instance, mut adapters, mut surface) = {
         let window = wb.build(&events_loop).unwrap();
         let instance = back::Instance::create("learn gfx-rs quad", 1);
         let surface = instance.create_surface(&window);
         let adapters = instance.enumerate_adapters();
         (window, instance, adapters, surface)
+    };
+
+    #[cfg(feature = "gl")]
+        let (mut adapters, mut surface) = {
+        let window = {
+            let builder =
+                back::config_context(back::glutin::ContextBuilder::new(), ColorFormat::SELF, None)
+                    .with_vsync(true);
+            back::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
+        };
+        let surface = back::Surface::from_window(window);
+        let adapters = surface.enumerate_adapters();
+        (adapters, surface)
     };
 
     adapters.iter().enumerate().for_each(|it|{
@@ -728,9 +745,9 @@ fn main() {
 }
 
 
-#[cfg(not(any(feature = "vulkan",feature = "dx12")))]
+#[cfg(not(any(feature = "vulkan",feature = "dx12",feature = "gl")))]
 fn main() {
-    println!("feature must be vulkan!");
+    println!("feature must be vulkan dx12 gl!");
 }
 
 

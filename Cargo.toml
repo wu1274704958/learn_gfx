@@ -8,6 +8,7 @@ edition = "2018"
 default = []
 vulkan = ["gfx-backend-vulkan"]
 dx12 = ["gfx-backend-dx12"]
+gl = ["gfx-backend-gl"]
 
 [lib]
 name = "learn_gfx"
@@ -39,6 +40,10 @@ gfx-backend-empty = "0.1.0"
 cgmath = "0.17.0"
 
 [dependencies.gfx-backend-vulkan]
+version = "0.1"
+optional = true
+
+[dependencies.gfx-backend-gl]
 version = "0.1"
 optional = true
 
