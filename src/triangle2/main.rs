@@ -34,6 +34,7 @@ use learn_gfx::comm::pick_adapter;
 use std::mem::size_of;
 use std::ptr::{copy,write_bytes};
 use cgmath::{Matrix4, Vector3, Vector4, perspective, Deg, Rad};
+use std::ops::Deref;
 
 const W:u32 = 800;
 const H:u32 = 600;
@@ -118,7 +119,7 @@ fn main()
     let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<bankend::Backend>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
 
     let mut triangl = Triangle{
-        pos : Vector3{ x:0.0f32,y:0.0f32,z:-2.0f32 },
+        pos : Vector3{ x:0.0f32,y:0.0f32,z:-4.0f32 },
         rotate : Vector3{ x : 0.0,y: 0.0,z : 0.0}
     };
 
@@ -257,7 +258,7 @@ fn main()
             }
         }
         update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,width as f32 / height as f32);
-        triangl.pos.z += 0.1f32;
+        triangl.rotate.y += 0.1f32;
     }
 
     unsafe {
@@ -393,7 +394,7 @@ unsafe fn create_vertex_buffer<B:hal::Backend>(device: &B::Device,
 
     let vertex_byte_size = size_of::<Vertex>() * 3;
 
-    copy_buffer_stage(vertices.as_ptr() as _,vertex_byte_size,buffer::Usage::VERTEX,device,mem_types,comm_pool,queue_group)
+    copy_buffer_stage(&(vertices[0]) as *const Vertex as _,vertex_byte_size,buffer::Usage::VERTEX,device,mem_types,comm_pool,queue_group)
 
 }
 
@@ -407,9 +408,9 @@ unsafe fn create_index_buffer<B:hal::Backend>(device: &B::Device,
         0,1,2
     ];
 
-    let byte_size = size_of::<u32>() as u64 * 3;
+    let byte_size = size_of::<u32>() * 3;
 
-    copy_buffer_stage(indices.as_ptr() as _,size_of::<u32>(),buffer::Usage::INDEX,device,mem_types,comm_pool,queue_group)
+    copy_buffer_stage(&(indices[0]) as *const u32 as _,byte_size  ,buffer::Usage::INDEX,device,mem_types,comm_pool,queue_group)
 }
 
 unsafe fn copy_buffer_stage<B:hal::Backend>(src : *const u8,
@@ -493,11 +494,11 @@ unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
 
 fn update_uniform_buffer<B:hal::Backend>(device:&B::Device,mem:&B::Memory,tri:&Triangle,aspect:f32)
 {
-    let mut model = Matrix4::<f32>::from_translation(tri.pos);
+    let mut model = Matrix4::<f32>::from_scale(1.0f32);
     model = Matrix4::<f32>::from_angle_x(Rad(tri.rotate.x)) * model;
     model = Matrix4::<f32>::from_angle_y(Rad(tri.rotate.y)) * model;
     model = Matrix4::<f32>::from_angle_z(Rad(tri.rotate.z)) * model;
-
+    model = Matrix4::<f32>::from_translation(tri.pos) * model;
     let ubo = Ubo{
         projection : cgmath::perspective(Deg(60.0),aspect,0.1f32,256.0f32),
         view : Matrix4::<f32>::from_scale(1.0f32),
