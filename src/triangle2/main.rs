@@ -4,6 +4,9 @@ extern crate gfx_backend_vulkan as backend;
 #[cfg(feature = "dx12")]
 extern crate gfx_backend_dx12 as backend;
 
+#[cfg(feature = "gl")]
+extern crate gfx_backend_gl as backend;
+
 extern crate gfx_hal as hal;
 extern crate winit;
 extern crate learn_gfx;
@@ -39,7 +42,7 @@ use winit::dpi::LogicalPosition;
 
 const W:u32 = 800;
 const H:u32 = 600;
-const TITLE:&'static str = "triangle";
+const TITLE:&'static str = "triangle2";
 
 //shader data
 const VERTEX_SHADER_DATA :&[u8] = include_bytes!("../../data/triangle2/triangle.vert.spv");
@@ -78,7 +81,7 @@ impl<B : hal::Backend> DepthStencil<B>
     }
 }
 
-#[cfg(any(feature = "vulkan",feature = "dx12"))]
+#[cfg(any(feature = "vulkan",feature = "dx12",feature = "gl"))]
 fn main()
 {
     let mut events_loop = winit::EventsLoop::new();
@@ -86,6 +89,7 @@ fn main()
         .with_dimensions(winit::dpi::LogicalSize::new(W as f64,H as f64))
         .with_title(TITLE);
 
+    #[cfg(not(feature = "gl"))]
     let (_window,_instance,mut surface,mut adapters) = {
         let window = wb.build(&events_loop).unwrap();
         let instance = backend::Instance::create(TITLE,1);
@@ -93,6 +97,19 @@ fn main()
         let adapters = instance.enumerate_adapters();
 
         (window,instance,surface,adapters)
+    };
+
+    #[cfg(feature = "gl")]
+        let (mut adapters, mut surface) = {
+        let window = {
+            let builder =
+                backend::config_context(backend::glutin::ContextBuilder::new(), Format::Rgba8Srgb, None)
+                    .with_vsync(true);
+            backend::glutin::GlWindow::new(wb, builder, &events_loop).unwrap()
+        };
+        let surface = backend::Surface::from_window(window);
+        let adapters = surface.enumerate_adapters();
+        (adapters, surface)
     };
 
     let (device,mut queue_group,adapter) = if let Ok(res) = pick_adapter(adapters,&surface)
@@ -112,11 +129,15 @@ fn main()
 
     let (caps,formats,..) = surface.compatibility(physical_device);
 
+    #[cfg(not(feature = "gl"))]
     let depth_format = if let Some(f) = get_depth_format::<TOfB>(physical_device){
         f
     }else{
         panic!("Not get depth format!");
     };
+
+    #[cfg(feature = "gl")]
+    let depth_format = Format::Rgba8Srgb;
 
     let mut depth_stencil = unsafe{ create_depth_stencil::<TOfB>(&device,depth_format,W,H,&memory_types) };
     println!("choose adapter = {:?}",adapter.info);
@@ -685,7 +706,7 @@ fn create_pipeline<B: hal::Backend>(device :&B::Device,pipeline_layout: &B::Pipe
 }
 
 
-fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
+fn get_mem_type_index(mut type_mask:u64,properties:hal::memory::Properties,mem_types:&Vec<MemoryType>) -> Option<u64>
 {
     let mem_type_count = mem_types.len() as _;
     let mut i = 0u64;
@@ -699,7 +720,7 @@ fn get_mem_type_index(type_mask:u64,properties:hal::memory::Properties,mem_types
                 return Some(i);
             }
         }
-
+        type_mask = type_mask >> 1;
         i += 1;
     }
     None
@@ -755,8 +776,8 @@ unsafe fn create_depth_stencil<B: hal::Backend>(device : &B::Device,depth_format
     }
 }
 
-#[cfg(not(any(feature = "vulkan",feature = "dx12")))]
+#[cfg(not(any(feature = "vulkan",feature = "dx12",feature = "gl")))]
 fn main()
 {
-    println!("features must be vulkan or dx12!");
+    println!("features must be one of vulkan dx12 gl!");
 }

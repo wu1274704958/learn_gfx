@@ -747,7 +747,7 @@ fn main() {
 
 #[cfg(not(any(feature = "vulkan",feature = "dx12",feature = "gl")))]
 fn main() {
-    println!("feature must be vulkan dx12 gl!");
+    println!("features must be one of vulkan dx12 gl!");
 }
 
 
