@@ -14,7 +14,7 @@ extern crate cgmath;
 #[cfg(any(feature = "vulkan",feature = "dx12",feature = "gl"))]
 type TOfB = backend::Backend;
 
-use winit::WindowEvent;
+
 use hal::{ Instance,PhysicalDevice,Device,Surface,SurfaceCapabilities,SwapchainConfig,memory,CommandPool,command,Submission,QueueGroup,Primitive,Swapchain};
 use hal::window::{ Extent2D,Backbuffer };
 use hal::image::{ViewKind,Extent,SubresourceRange,Layout,Access,Kind,Tiling,Usage,ViewCapabilities};
@@ -24,7 +24,6 @@ use hal::pass::{Attachment,
                 AttachmentLoadOp,
                 AttachmentStoreOp,
                 SubpassDesc,
-                AttachmentLayout,
                 SubpassDependency,
                 SubpassRef,
                 Subpass
@@ -90,7 +89,7 @@ fn main()
         .with_title(TITLE);
 
     #[cfg(not(feature = "gl"))]
-    let (_window,_instance,mut surface,mut adapters) = {
+    let (_window,_instance,mut surface, adapters) = {
         let window = wb.build(&events_loop).unwrap();
         let instance = backend::Instance::create(TITLE,1);
         let surface = instance.create_surface(&window);
@@ -100,7 +99,7 @@ fn main()
     };
 
     #[cfg(feature = "gl")]
-        let (mut adapters, mut surface) = {
+        let ( adapters, mut surface) = {
         let window = {
             let builder =
                 backend::config_context(backend::glutin::ContextBuilder::new(), Format::Rgba8Srgb, None)
@@ -120,7 +119,7 @@ fn main()
     };
 
     let memory_types = adapter.physical_device.memory_properties().memory_types;
-    let limits = adapter.physical_device.limits();
+    let _limits = adapter.physical_device.limits();
     let mut command_pool = unsafe {
         device.create_command_pool_typed(&queue_group,CommandPoolCreateFlags::empty())
     }.unwrap();
@@ -153,16 +152,16 @@ fn main()
     };
 
     let render_pass = create_render_pass::<TOfB>(&device,format,depth_format).ok().unwrap();
-    let (mut swap_chain,mut extent,mut image_views,mut frame_buffers) = create_swapchain::<TOfB>(&device,
+    let (mut swap_chain,mut _extent,mut image_views,mut frame_buffers) = create_swapchain::<TOfB>(&device,
                                                                              &mut surface,
                                                                              &render_pass,
                                                                              &caps,format,
                                                                              W ,H,None,None,None,&depth_stencil);
-    let (vertexBuffer,vertexMem) = unsafe{ create_vertex_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
+    let (vertex_buffer,vertex_mem) = unsafe{ create_vertex_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
-    let (indexBuffer,indexMem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
+    let (index_buffer,index_mem) = unsafe{ create_index_buffer(&device,&memory_types,&mut command_pool,&mut queue_group).unwrap() };
 
-    let (uniformBuffer,uniformMem) = unsafe{ create_buffer::<TOfB>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
+    let (uniform_buffer,uniform_mem) = unsafe{ create_buffer::<TOfB>(size_of::<Ubo>() as u64,buffer::Usage::UNIFORM,&device,&memory_types).unwrap() };
 
     let mut triangl = Triangle{
         pos : Vector3{ x:0.0f32,y:0.0f32,z:-4.0f32 },
@@ -182,17 +181,17 @@ fn main()
         set : &descriptor_set,
         binding : 0,
         array_offset : 0,
-        descriptors : &[ Descriptor::Buffer(&uniformBuffer,None..None)]
+        descriptors : &[ Descriptor::Buffer(&uniform_buffer,None..None)]
     };
     unsafe { device.write_descriptor_sets(Some(write_descriptor_set)); }
-    update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,view_rot,W as f32 / H as f32);
+    update_uniform_buffer::<TOfB>(&device,&uniform_mem,&triangl,view_rot,W as f32 / H as f32);
     let pipeline_layout = unsafe { device.create_pipeline_layout(
         vec![&descriptor_set_layout],
         &[]).unwrap() };
 
     let pipeline = create_pipeline::<TOfB>(&device,&pipeline_layout,&render_pass).unwrap();
-    let mut render_semaphore = device.create_semaphore().unwrap();
-    let mut present_semaphore = device.create_semaphore().unwrap();
+    let render_semaphore = device.create_semaphore().unwrap();
+    let present_semaphore = device.create_semaphore().unwrap();
     let mut frame_fence = device.create_fence(true).unwrap();
 
     let mut running = true;
@@ -248,7 +247,7 @@ fn main()
                                                                         &depth_stencil);
 
             swap_chain = swapchain_;
-            extent = extent_;
+            _extent = extent_;
             image_views = image_views_;
             frame_buffers = framebuffers_;
 
@@ -278,7 +277,7 @@ fn main()
             };
 
             let index_buffer_view = buffer::IndexBufferView{
-                buffer : &indexBuffer,
+                buffer : &index_buffer,
                 offset : 0,
                 index_type : hal::IndexType::U32
             };
@@ -286,7 +285,7 @@ fn main()
             draw_buffer.set_viewports(0,&[viewport.clone()]);
             draw_buffer.set_scissors(0,&[viewport.rect]);
             draw_buffer.bind_graphics_pipeline(&pipeline);
-            draw_buffer.bind_vertex_buffers(0, Some((&vertexBuffer, 0)));
+            draw_buffer.bind_vertex_buffers(0, Some((&vertex_buffer, 0)));
             draw_buffer.bind_index_buffer(index_buffer_view);
             draw_buffer.bind_graphics_descriptor_sets(&pipeline_layout,0,Some(&descriptor_set),&[]);
 
@@ -309,23 +308,23 @@ fn main()
             };
 
 
-            unsafe {
-                queue_group.queues[0].submit(submission, Some(&mut frame_fence));
 
-                device.wait_for_fence(&frame_fence, !0).unwrap();
+            queue_group.queues[0].submit(submission, Some(&mut frame_fence));
 
-                command_pool.free(Some(draw_buffer));
+            device.wait_for_fence(&frame_fence, !0).unwrap();
 
-                if let Err(_) = swap_chain.present(
-                    &mut queue_group.queues[0],
-                    frame_index,
-                    vec![&present_semaphore],
-                ){
-                    recreate_swapchain = true;
-                }
+            command_pool.free(Some(draw_buffer));
+
+            if let Err(_) = swap_chain.present(
+                &mut queue_group.queues[0],
+                frame_index,
+                vec![&present_semaphore],
+            ){
+                recreate_swapchain = true;
             }
+
         }
-        update_uniform_buffer::<TOfB>(&device,&uniformMem,&triangl,view_rot,width as f32 / height as f32);
+        update_uniform_buffer::<TOfB>(&device,&uniform_mem,&triangl,view_rot,width as f32 / height as f32);
     }
 
     unsafe {
@@ -337,12 +336,12 @@ fn main()
         device.destroy_swapchain(swap_chain);
         device.destroy_command_pool(command_pool.into_raw());
         device.destroy_render_pass(render_pass);
-        device.free_memory(vertexMem);
-        device.destroy_buffer(vertexBuffer);
-        device.free_memory(indexMem);
-        device.destroy_buffer(indexBuffer);
-        device.free_memory(uniformMem);
-        device.destroy_buffer(uniformBuffer);
+        device.free_memory(vertex_mem);
+        device.destroy_buffer(vertex_buffer);
+        device.free_memory(index_mem);
+        device.destroy_buffer(index_buffer);
+        device.free_memory(uniform_mem);
+        device.destroy_buffer(uniform_buffer);
         device.destroy_graphics_pipeline(pipeline);
         device.destroy_pipeline_layout(pipeline_layout);
         descriptor_pool.free_sets(vec![descriptor_set]);
@@ -407,7 +406,7 @@ fn create_swapchain<B:hal::Backend>(device:&B::Device,
                                                       Extent2D{ width:w,height:h });
     let extent = swapchain_config.extent.to_extent();
 
-    let (mut swapchain, backbuffer) = unsafe { device.create_swapchain(surface,swapchain_config,old_swapchain).unwrap()};
+    let ( swapchain, backbuffer) = unsafe { device.create_swapchain(surface,swapchain_config,old_swapchain).unwrap()};
 
     if let Some(ivs) = old_ivs{
         for iv in ivs{
@@ -506,20 +505,20 @@ unsafe fn copy_buffer_stage<B:hal::Backend>(src : *const u8,
                                        mem_types).unwrap();
 
     let stag_mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
-    device.bind_buffer_memory(&stag_mem,0,&mut stag_buffer);
+    device.bind_buffer_memory(&stag_mem,0,&mut stag_buffer).ok().unwrap();
 
     let ptr = device.map_memory(&stag_mem,0..(byte_size as u64) ).unwrap();
     copy(src,ptr, byte_size);
     device.unmap_memory(&stag_mem);
 
-    let mut indexBuffer = device.create_buffer(byte_size as u64,buffer::Usage::TRANSFER_DST | buffer_usage).unwrap();
+    let mut index_buffer = device.create_buffer(byte_size as u64,buffer::Usage::TRANSFER_DST | buffer_usage).unwrap();
 
-    let requirment = device.get_buffer_requirements(&indexBuffer);
+    let requirment = device.get_buffer_requirements(&index_buffer);
     let mem_index = get_mem_type_index(requirment.type_mask,
                                        memory::Properties::DEVICE_LOCAL,mem_types).unwrap();
-    let indexMem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
+    let index_mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
 
-    device.bind_buffer_memory(&indexMem,0,&mut indexBuffer);
+    device.bind_buffer_memory(&index_mem,0,&mut index_buffer).ok().unwrap();
 
     let cp_cmd = {
         let mut cp_cmd:command::CommandBuffer<B,hal::Graphics,command::OneShot> = comm_pool.acquire_command_buffer::<command::OneShot>();
@@ -531,22 +530,22 @@ unsafe fn copy_buffer_stage<B:hal::Backend>(src : *const u8,
             size: byte_size as _
         };
 
-        cp_cmd.copy_buffer(&stag_buffer,&indexBuffer,&[regions]);
+        cp_cmd.copy_buffer(&stag_buffer,&index_buffer,&[regions]);
 
         cp_cmd.finish();
         cp_cmd
     };
-    let mut fence = device.create_fence(false).unwrap();
+    let fence = device.create_fence(false).unwrap();
 
     queue_group.queues[0].submit_nosemaphores(&[cp_cmd],Some(&fence));
-    device.wait_for_fence(&fence,!0);
+    device.wait_for_fence(&fence,!0).ok().unwrap();
 
     device.destroy_fence(fence);
 
     device.free_memory(stag_mem);
     device.destroy_buffer(stag_buffer);
 
-    Some((indexBuffer,indexMem))
+    Some((index_buffer,index_mem))
 }
 
 unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
@@ -557,13 +556,13 @@ unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
     let mut buffer = device.create_buffer(byte_size,
                                                buffer_usage ).unwrap();
 
-    let requirment = device.get_buffer_requirements(&buffer) ;
-    let mem_index = get_mem_type_index(requirment.type_mask,
+    let requirement = device.get_buffer_requirements(&buffer) ;
+    let mem_index = get_mem_type_index(requirement.type_mask,
                                        memory::Properties::COHERENT | memory::Properties::CPU_VISIBLE,
                                        mem_types).unwrap();
 
-    let mem = device.allocate_memory((mem_index as usize).into(),requirment.size).unwrap();
-    device.bind_buffer_memory(&mem,0,&mut buffer);
+    let mem = device.allocate_memory((mem_index as usize).into(),requirement.size).unwrap();
+    device.bind_buffer_memory(&mem,0,&mut buffer).ok().unwrap();
 
     Some((buffer,mem))
 }
@@ -725,7 +724,7 @@ fn get_mem_type_index(mut type_mask:u64,properties:hal::memory::Properties,mem_t
     }
     None
 }
-
+#[allow(dead_code)]
 fn get_depth_format<B: hal::Backend>(physical_device:&B::PhysicalDevice) -> Option<Format>
 {
     let expect_arr = [
@@ -766,7 +765,7 @@ unsafe fn create_depth_stencil<B: hal::Backend>(device : &B::Device,depth_format
         layers : 0..1,
         levels : 0..1
     };
-    device.bind_image_memory(&mem,0,&mut img);
+    device.bind_image_memory(&mem,0,&mut img).ok().unwrap();
     let view = device.create_image_view(&img,ViewKind::D2,depth_format,Swizzle::NO,range).unwrap();
 
     DepthStencil::<B>{
