@@ -221,9 +221,9 @@ fn main()
                         if left_button_down{
                             let offset = LogicalPosition::new(position.x - cursor_pos.x,position.y - cursor_pos.y);
                             triangl.rotate.y += (offset.x * 1.25) as f32;
-//                            triangl.rotate.x -= (offset.y * 1.25) as f32;
+                            triangl.rotate.x -= (offset.y * 1.25) as f32;
 //                            view_rot.y += (offset.x ) as f32;
-                            view_rot.x -= (offset.y * 1.25) as f32;
+//                            view_rot.x -= (offset.y * 1.25) as f32;
                         }
                         cursor_pos = position;
                     },
@@ -570,15 +570,13 @@ unsafe fn create_buffer<B:hal::Backend>(    byte_size: u64,
 fn update_uniform_buffer<B:hal::Backend>(device:&B::Device,mem:&B::Memory,tri:&Triangle,view_rot:Vector3<f32>,aspect:f32)
 {
     let mut model = Matrix4::<f32>::from_scale(1.0f32);
-    model = Matrix4::<f32>::from_angle_x(Rad(tri.rotate.x.to_radians())) * model;
-    model = Matrix4::<f32>::from_angle_y(Rad(tri.rotate.y.to_radians())) * model;
-    model = Matrix4::<f32>::from_angle_z(Rad(tri.rotate.z.to_radians())) * model;
+    model = model * Matrix4::<f32>::from_axis_angle(Vector3::unit_x(),Rad(tri.rotate.x.to_radians()));
+    model = model * Matrix4::<f32>::from_axis_angle(Vector3::unit_y(),Rad(tri.rotate.y.to_radians()));
+    model = model * Matrix4::<f32>::from_axis_angle(Vector3::unit_z(),Rad(tri.rotate.z.to_radians()));
+    model = Matrix4::<f32>::from_translation(tri.pos) * model;
 
     let mut view = Matrix4::<f32>::from_scale(1.0f32);
-    view = Matrix4::<f32>::from_angle_x(Rad(view_rot.x.to_radians())) * view;
-    view = Matrix4::<f32>::from_angle_y(Rad(view_rot.y.to_radians())) * view;
-    view = Matrix4::<f32>::from_angle_z(Rad(view_rot.z.to_radians())) * view;
-    view = Matrix4::<f32>::from_translation(tri.pos) * view;
+
     let ubo = Ubo{
         projection : cgmath::perspective(Deg(60.0),aspect,0.1f32,256.0f32),
         view,
