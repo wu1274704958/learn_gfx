@@ -11,6 +11,7 @@ use hal::{  Adapter,
 use hal::adapter::{
     DeviceType
 };
+use std::ops::Range;
 
 pub fn pick_adapter<B: Backend>(mut adapters: Vec<Adapter<B>>, surface: &B::Surface) -> Result<(B::Device, QueueGroup<B, hal::Graphics>,Adapter<B>), ()>
 {
@@ -46,5 +47,31 @@ pub fn pick_adapter<B: Backend>(mut adapters: Vec<Adapter<B>>, surface: &B::Surf
         return Ok(r);
     }
     return Err(());
+}
+
+
+
+pub struct Model{
+    pub vertices : Vec<f32>,
+    pub indices : Vec<i32>,
+    pub parts : Vec<Range<usize>>
+}
+
+impl Model {
+    pub fn new(vertices:Vec<f32>,indices:Vec<i32>,parts : Vec<Range<usize>>) -> Model
+    {
+        Model{
+            vertices,
+            indices,
+            parts
+        }
+    }
+}
+
+pub fn load_model() -> Model
+{
+//    let importer = Importer::new();
+
+    Model::new(vec![],vec![],vec![])
 }
 

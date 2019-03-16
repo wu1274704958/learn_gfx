@@ -29,6 +29,10 @@ path = "src/triangle/main.rs"
 name = "triangle2"
 path = "src/triangle2/main.rs"
 
+[[bin]]
+name = "load_model"
+path = "src/load_model/main.rs"
+
 [dependencies]
 env_logger = "0.5"
 image = "0.19"
