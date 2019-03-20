@@ -12,6 +12,7 @@ use hal::adapter::{
     DeviceType
 };
 use std::ops::Range;
+use assimp::Importer;
 
 pub fn pick_adapter<B: Backend>(mut adapters: Vec<Adapter<B>>, surface: &B::Surface) -> Result<(B::Device, QueueGroup<B, hal::Graphics>,Adapter<B>), ()>
 {
@@ -70,7 +71,7 @@ impl Model {
 
 pub fn load_model() -> Model
 {
-//    let importer = Importer::new();
+    let importer = Importer::new();
 
     Model::new(vec![],vec![],vec![])
 }

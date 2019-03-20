@@ -5,4 +5,5 @@ use learn_gfx::comm::{ Model,load_model };
 fn main()
 {
     let model = load_model();
+    dbg!("not impl");
 }
